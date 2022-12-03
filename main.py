@@ -8,13 +8,13 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from utils.training import parse_args, set_seed, evaluate_results_nc
-from utils.training import EarlyStopping, IndicesSampler, Namespace, get_logger
-from utils.training import svm_test
-from utils.data import to_torch, load_DBLP, sample_metapath
+from utils.training import parse_args, set_seed, get_logger
+from utils.training import EarlyStopping, IndicesSampler, Namespace
+from utils.evaluate import svm_test
+from utils.data import to_torch, to_np, load_DBLP, sample_metapath
 from utils.noisy_labels import apply_label_noise
 
-from exp.config import train_cfg, model_cfg, data_cfg
+from config import train_cfg, model_cfg, data_cfg
 
 if __name__ == '__main__':
 
@@ -33,7 +33,8 @@ if __name__ == '__main__':
     os.makedirs(workdir, exist_ok=(args.tag == 'debug'))
     cfg_file = osp.join(workdir, 'cfg.json')
 
-    logger_result = get_logger('result', workdir)
+    log_file = osp.join(workdir, 'avg_result.log')
+    logger_result = get_logger('exp_result', log_file)
 
     # load dataset
     dataset = data_cfg['dataset']
@@ -47,12 +48,17 @@ if __name__ == '__main__':
     node_feature_list = to_torch(node_feature_list, device)
 
     # apply label noise
-    # noisy_labels, label_corruption_mask = apply_label_noise(labels=labels, **data_cfg['noise_cfg'])
-    # corruption_ratio = np.mean(labels[train_indices] != noisy_labels[train_indices])
-    # data_cfg['noise_cfg']['corruption_ratio'] = corruption_ratio
+    LNL = data_cfg['noise_cfg'].pop('apply')
+    if LNL:
+        noisy_labels, label_corruption_mask = apply_label_noise(labels=labels, **data_cfg['noise_cfg'])
+        noisy_labels = to_torch(noisy_labels, device, indices=True)
+
+        corruption_ratio = np.mean(label_corruption_mask[train_indices].astype(np.int32))
+        data_cfg['noise_cfg']['corruption_ratio'] = corruption_ratio
+    else:
+        data_cfg.pop('noise_cfg')
 
     labels = to_torch(labels, device, indices=True)
-    # noisy_labels = to_torch(noisy_labels, device, indices=True)
 
     # save additional information to cfg
     data_cfg['num_metapaths'] = num_metapaths
@@ -75,13 +81,28 @@ if __name__ == '__main__':
     assert model_type == 'HAN'
 
     exp_results = {}
-    for key in ['train_loss, train_acc, val_loss, val_acc, test_acc']:
+    for key in [
+        'train_loss', 'train_acc', 'val_loss', 'val_acc', 'test_acc',
+        'macro_f1', 'micro_f1'
+    ]:
         exp_results[key] = []
 
-    for seed in args.seed:
+    display = dict(
+        train_loss='Train_Loss',
+        train_acc='Train_Accuracy',
+        val_loss='Val_Loss',
+        val_acc='Val_Accuracy',
+        test_acc='Test_Accuracy',
+        macro_f1='Macro-F1',
+        micro_f1='Micro-F1',
+    )
+
+    num_repeat = len(args.seed_list)
+    for exp_id, seed in enumerate(args.seed_list):
 
         set_seed(seed)
-        logger = get_logger(f'seed{seed}', workdir)
+        log_file = osp.join(workdir, f'{seed}.log')
+        logger = get_logger(f'{exp_id}_{num_repeat}_seed{seed}', log_file)
         ckpt_file = osp.join(workdir, f'ckpt_seed{seed}.pt')
 
         # build model
@@ -98,53 +119,45 @@ if __name__ == '__main__':
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, **args.scheduler_cfg)
 
         # training utils
-        early_stopping = EarlyStopping(patience=args.patience, criterion='val_loss', delta=0, ckpt_file=ckpt_file, logger=logger)
+        early_stopping = EarlyStopping(
+            patience=args.patience, criterion=('val_loss', -1), margin=0, ckpt_file=ckpt_file
+        )
         train_sampler = IndicesSampler(train_indices, args.batch_size, shuffle=True)
         val_sampler = IndicesSampler(val_indices, args.batch_size, shuffle=False)
-
-        svm_macro_f1_lists = []
-        svm_micro_f1_lists = []
-        nmi_mean_list = []
-        nmi_std_list = []
-        ari_mean_list = []
-        ari_std_list = []
 
         for epoch in range(args.epoch):
             t_start = time.time()
             model.train()
             train_loss_list = []
-            time_list = []
             accurate_cnt = 0
             for iteration in range(train_sampler.num_iterations()):
-                t0 = time.time()
                 indices = train_sampler()
-                metapath_sampled_list = sample_metapath(indices, metapath_list, args.sample_limit, keep_intermediate=False)
+                metapath_sampled_list = sample_metapath(indices, metapath_list, args.sample_limit,
+                                                        keep_intermediate=False)
                 indices = to_torch(indices, device, indices=True)
                 metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
 
-                t1 = time.time()
                 logits, embeddings = model(
                     indices, metapath_sampled_list, node_type_mapping, node_feature_list
                 )
                 logp = F.log_softmax(logits, 1)
-                train_loss = F.nll_loss(logp, labels[indices])
-                train_loss_list.append(train_loss.item())
-                accurate_cnt += torch.sum(torch.argmax(logp, dim=-1) == labels[indices]).item()
 
-                t2 = time.time()
+                if LNL:
+                    train_labels = noisy_labels[indices]
+                else:
+                    train_labels = labels[indices]
+
+                train_loss = F.nll_loss(logp, train_labels)
+                train_loss_list.append(train_loss.item())
+                accurate_cnt += torch.sum(torch.argmax(logp, dim=-1) == train_labels).item()
+
                 optimizer.zero_grad()
                 train_loss.backward()
                 optimizer.step()
 
-                t3 = time.time()
-                time_list.append([
-                    t1 - t0, t2 - t1, t3 - t2
-                ])
             scheduler.step()
             train_loss = np.mean(train_loss_list)
             train_acc = accurate_cnt / train_indices.shape[0]
-            logger.info('Epoch {:05d} | Time {:.4f} | Train_Loss {:.4f} | Train_Accuracy {:.4f}'.format(
-                    epoch, np.sum(time_list), train_loss, train_acc))
 
             model.eval()
             val_logp = []
@@ -162,26 +175,36 @@ if __name__ == '__main__':
                     logp = F.log_softmax(logits, 1)
                     val_logp.append(logp)
                 val_logp = torch.cat(val_logp, dim=0)
-                val_loss = F.nll_loss(val_logp, labels[val_indices])
+                val_loss = F.nll_loss(val_logp, labels[val_indices]).item()
                 val_acc = torch.mean(torch.argmax(val_logp, dim=-1) == labels[val_indices], dtype=torch.float32).item()
             t_end = time.time()
-            logger.info('Epoch {:05d} | Time {:.4f} | Val_Loss {:.4f} | Val_Accuracy {:.4f}'.format(
-                epoch, t_end - t_start, val_loss.item(), val_acc))
+            time_elapsed = t_end - t_start
+            msg = f'Epoch {epoch:03d} | Time {time_elapsed:.4f}' + \
+                  f' | Train_Loss {train_loss:.4f} | Train_Accuracy {train_acc:.4f}' + \
+                  f' | Val_Loss {val_loss:.4f} | Val_Accuracy {val_acc:.4f}'
+            logger.info(msg)
             record = dict(
                 train_loss=train_loss,
                 train_acc=train_acc,
                 val_loss=val_loss,
                 val_acc=val_acc,
             )
-            result = early_stopping.record(record=record, model=model)
-            if result is not None:
-                best_record, record_msg = result
-                for key, value in best_record:
+            best_record, msg = early_stopping.record(record=record, model=model)
+            logger.info(msg)
+            if best_record is not None:
+                msg = []
+                for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc']:
+                    msg.append(f'{display[term]} {best_record[term]:.6f}')
+                msg = ' | '.join(msg)
+                # record_msg = f"Train_Loss {best_record['train_loss']:.6f}" +\
+                #              f" | Train_Accuracy {best_record['train_acc']:.6f}" + \
+                #              f" | Val_Loss {best_record['val_loss']:.6f}" + \
+                #              f" | Val_Accuracy {best_record['val_acc']:.6f}"
+                logger.info(msg)
+                for key, value in best_record.items():
                     exp_results[key].append(value)
-                logger.info(f'Early stopping! Best record is {record_msg}')
                 break
 
-        # testing with evaluate_results_nc
         test_sampler = IndicesSampler(test_indices, args.batch_size, shuffle=False)
 
         model.load_state_dict(torch.load(ckpt_file))
@@ -207,42 +230,40 @@ if __name__ == '__main__':
             test_acc = torch.mean(torch.argmax(test_logits, dim=-1) == labels[test_indices], dtype=torch.float32).item()
 
         exp_results['test_acc'].append(test_acc)
-        logger.info(f'test_accuracy {test_acc:.4f}')
+        msg = f'Test_Accuracy {test_acc:.6f}'
+        logger.info(msg)
 
-        svm_results = svm_test(test_embeddings, labels[test_indices], seed)
+        test_embeddings = to_np(test_embeddings)
+        test_labels = to_np(labels[test_indices])
+        train_ratio_list = [0.8, 0.6, 0.4, 0.2]
+        svm_results = svm_test(test_embeddings, test_labels, seed, train_ratio_list=train_ratio_list)
 
-        for term, results in svm_results.items():
-            print(term)
-            for key, value in results.items():
-                print(key, value)
-        import pdb
-        pdb.set_trace()
+        for key, value in svm_results.items():
+            exp_results[key].append(value['mean'])
 
-        # svm_macro_f1_list, svm_micro_f1_list, nmi_mean, nmi_std, ari_mean, ari_std = evaluate_results_nc(
-        #     test_embeddings.cpu().numpy(), labels[test_indices].cpu().numpy(), num_classes=num_node_types)
-        #
-        # svm_macro_f1_lists.append(svm_macro_f1_list)
-        # svm_micro_f1_lists.append(svm_micro_f1_list)
-        # nmi_mean_list.append(nmi_mean)
-        # nmi_std_list.append(nmi_std)
-        # ari_mean_list.append(ari_mean)
-        # ari_std_list.append(ari_std)
-        #
-        # # print out a summary of the evaluations
-        # svm_macro_f1_lists = np.transpose(np.array(svm_macro_f1_lists), (1, 0, 2))
-        # svm_micro_f1_lists = np.transpose(np.array(svm_micro_f1_lists), (1, 0, 2))
-        # nmi_mean_list = np.array(nmi_mean_list)
-        # nmi_std_list = np.array(nmi_std_list)
-        # ari_mean_list = np.array(ari_mean_list)
-        # ari_std_list = np.array(ari_std_list)
-        # print('----------------------------------------------------------------')
-        # print('SVM tests summary')
-        # print('Macro-F1: ' + ', '.join(['{:.6f}~{:.6f} ({:.1f})'.format(
-        #     macro_f1[:, 0].mean(), macro_f1[:, 1].mean(), train_size) for macro_f1, train_size in
-        #     zip(svm_macro_f1_lists, [0.8, 0.6, 0.4, 0.2])]))
-        # print('Micro-F1: ' + ', '.join(['{:.6f}~{:.6f} ({:.1f})'.format(
-        #     micro_f1[:, 0].mean(), micro_f1[:, 1].mean(), train_size) for micro_f1, train_size in
-        #     zip(svm_micro_f1_lists, [0.8, 0.6, 0.4, 0.2])]))
-        # print('K-means tests summary')
-        # print('NMI: {:.6f}~{:.6f}'.format(nmi_mean_list.mean(), nmi_std_list.mean()))
-        # print('ARI: {:.6f}~{:.6f}'.format(ari_mean_list.mean(), ari_std_list.mean()))
+        record_msg = '\n'.join([value['msg'] for value in svm_results.values()])
+        logger.info(record_msg)
+
+    for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc', 'test_acc']:
+        result = exp_results[term]
+        msg = ' | '.join([f'{num:.6f}' for num in result])
+        msg = f'{display[term]}: {msg}'
+        logger_result.info(msg)
+        mean = np.mean(result)
+        std = np.std(result)
+        msg = f'{display[term]} Summary: {mean:.6f} ~ {std:.6f}'
+        logger_result.info(msg)
+
+    train_ratio_list = [0.8, 0.6, 0.4, 0.2]
+    for term in ['macro_f1', 'micro_f1']:
+        results = np.array(exp_results[term])
+        msg = []
+        for index, train_ratio in enumerate(train_ratio_list):
+            result = results[:, index]
+            msg = ' | '.join([f'{num:.6f}' for num in result])
+            msg = f'{display[term]}({train_ratio:.1f}): {msg}'
+            logger_result.info(msg)
+            mean = np.mean(result)
+            std = np.std(result)
+            msg = f'{display[term]}({train_ratio:.1f}) Summary: {mean:.6f} ~ {std:.6f}'
+            logger_result.info(msg)

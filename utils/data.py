@@ -22,6 +22,12 @@ def to_torch(data, device, indices=False):
     return data.to(device)
 
 
+def to_np(data):
+    assert isinstance(data, torch.Tensor)
+    data = data.detach().cpu().numpy()
+    return data
+
+
 def load_DBLP(project_root):
     data_root = osp.join(project_root, 'data/preprocessed/DBLP_processed')
 

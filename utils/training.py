@@ -10,7 +10,7 @@ from sklearn.metrics import f1_score, normalized_mutual_info_score, adjusted_ran
 from sklearn.cluster import KMeans
 from sklearn.svm import LinearSVC
 
-from typing import Optional, Dict
+from typing import Tuple, Dict
 
 
 class Namespace:
@@ -21,22 +21,6 @@ class Namespace:
     def update(self, **kwargs):
         self.__dict__.update(kwargs)
         return
-
-
-def get_logger(name, workdir):
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s')
-
-    file = osp.join(workdir, f'{name}.log')
-    file_handle = logging.FileHandler(file, mode='w+', encoding='utf-8')
-    file_handle.setFormatter(formatter)
-    logger.addHandler(file_handle)
-
-    stream_handle = logging.StreamHandler()
-    stream_handle.setFormatter(formatter)
-    logger.addHandler(stream_handle)
-    return logger
 
 
 def parse_args():
@@ -59,51 +43,21 @@ def set_seed(seed):
     return
 
 
-def svm_test(embeddings, labels, seed, train_ratio_list=(0.8, 0.6, 0.4, 0.2), num_repeat=10):
-    macro_f1_mean = []
-    macro_f1_std = []
-    micro_f1_mean = []
-    micro_f1_std = []
-    random_seeds = np.arange(num_repeat, dtype=np.int32) + seed
-    for train_ratio in train_ratio_list:
-        macro_f1_list = []
-        micro_f1_list = []
-        for i in range(num_repeat):
-            X_train, X_test, y_train, y_test = train_test_split(
-                embeddings, labels, test_size=1 - train_ratio, shuffle=True, random_state=random_seeds[i]
-            )
-            svm = LinearSVC(dual=False)
-            svm.fit(X_train, y_train)
-            y_pred = svm.predict(X_test)
-            macro_f1 = f1_score(y_test, y_pred, average='macro')
-            micro_f1 = f1_score(y_test, y_pred, average='micro')
-            macro_f1_list.append(macro_f1)
-            micro_f1_list.append(micro_f1)
-        macro_f1_mean.append((np.mean(macro_f1_list)))
-        macro_f1_std.append((np.std(macro_f1_list)))
-        micro_f1_mean.append((np.mean(micro_f1_list)))
-        micro_f1_std.append((np.std(micro_f1_list)))
-    macro_f1_msg = 'Macro-F1: ' + '|'.join([
-        f'{macro_f1_mean[i]:,6f}~{macro_f1_std[i]:.6f} ({train_ratio_list[i]:.1f})'
-        for i in range(len(train_ratio_list))
-    ])
-    micro_f1_msg = 'Micro-F1: ' + '|'.join([
-        f'{micro_f1_mean[i]:,6f}~{micro_f1_std[i]:.6f} ({train_ratio_list[i]:.1f})'
-        for i in range(len(train_ratio_list))
-    ])
-    result_dict = dict(
-        macro_f1=dict(
-            mean=macro_f1_mean,
-            std=macro_f1_std,
-            msg=macro_f1_msg,
-        ),
-        micro_f1=dict(
-            mean=micro_f1_mean,
-            std=micro_f1_std,
-            msg=micro_f1_msg
-        )
-    )
-    return result_dict
+def get_logger(name, file):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    # %(asctime)s %(levelname)s
+    formatter = logging.Formatter('%(name)s %(message)s')
+
+    file_handle = logging.FileHandler(file, mode='w+', encoding='utf-8')
+    file_handle.setFormatter(formatter)
+    logger.addHandler(file_handle)
+
+    stream_handle = logging.StreamHandler()
+    stream_handle.setFormatter(formatter)
+    logger.addHandler(stream_handle)
+    return logger
+
 
 def evaluate_results_nc(embeddings, labels, num_classes):
     def svm_test(X, y, test_sizes=(0.2, 0.4, 0.6, 0.8), repeat=10):
@@ -139,7 +93,6 @@ def evaluate_results_nc(embeddings, labels, num_classes):
             ari_list.append(ari_score)
         return np.mean(nmi_list), np.std(nmi_list), np.mean(ari_list), np.std(ari_list)
 
-
     print('SVM test')
     svm_macro_f1_list, svm_micro_f1_list = svm_test(embeddings, labels)
     print('Macro-F1: ' + ', '.join(['{:.6f}~{:.6f} ({:.1f})'.format(macro_f1_mean, macro_f1_std, train_size) for
@@ -157,11 +110,10 @@ def evaluate_results_nc(embeddings, labels, num_classes):
 
 
 class EarlyStopping:
-    def __init__(self, patience, criterion, delta, ckpt_file, logger: Optional[logging.Logger] = None):
+    def __init__(self, patience, criterion: Tuple[str, int], margin, ckpt_file):
         self.patience = patience
         self.criterion = criterion
-        self.delta = delta
-        self.logger = logger
+        self.margin = margin
         self.ckpt_file = ckpt_file
 
         self.counter = 0
@@ -169,32 +121,31 @@ class EarlyStopping:
         return
 
     def record(self, record: Dict[str, float], model):
-        if self.best_record is None:
-            self.best_record = record
-            self._save_checkpoint(record, model)
-        elif record[self.criterion] < self.best_record[self.criterion] - self.delta:
-            self.counter += 1
-            if self.logger is not None:
-                self.logger.info(f'EarlyStopping counter {self.counter} / {self.patience}.')
-            if self.counter >= self.patience:
-                record_msg = '|'.join([f'{key}: {value:.6f}' for key, value in self.best_record.items()])
-                return self.best_record, record_msg
-        else:
-            self.best_record = record
-            self._save_checkpoint(record, model)
+        flag_improve = True
+        if self.best_record is not None:
+            if self.criterion[1] > 0 and \
+                    record[self.criterion[0]] < self.best_record[self.criterion[0]] - self.margin:
+                flag_improve = False
+            elif self.criterion[1] < 0 and \
+                    record[self.criterion[0]] > self.best_record[self.criterion[0]] + self.margin:
+                flag_improve = False
+        if flag_improve:
+            torch.save(model.state_dict(), self.ckpt_file)
             self.counter = 0
-        return None
-
-    def _save_checkpoint(self, record, model):
-        if self.logger is not None:
-            prev_best = self.best_record[self.criterion] if self.best_record is not None else -np.Inf
-            new_best = record[self.criterion]
-
-            self.logger.info(
-                f'{self.criterion} increased {prev_best:.6f} --> {new_best:.6f}. Checkpoint saved.'
-            )
-        torch.save(model.state_dict(), self.ckpt_file)
-        return
+            if self.best_record is None:
+                prev_best = -np.inf if self.criterion[1] > 0 else np.inf
+            else:
+                prev_best = self.best_record[self.criterion[0]]
+            new_best = record[self.criterion[0]]
+            self.best_record = record
+            record_msg = f'{self.criterion[0]} improved {prev_best:.6f} --> {new_best:.6f}. Checkpoint saved.'
+        else:
+            self.counter += 1
+            record_msg = f'EarlyStopping counter {self.counter} / {self.patience}.'
+            if self.counter >= self.patience:
+                record_msg = 'EarlyStopping. Best record is:'
+                return self.best_record, record_msg
+        return None, record_msg
 
 
 class IndicesSampler:
