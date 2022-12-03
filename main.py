@@ -12,25 +12,27 @@ from utils.training import parse_args, set_seed, get_logger
 from utils.training import EarlyStopping, IndicesSampler, Namespace
 from utils.evaluate import svm_test
 from utils.data import to_torch, to_np, load_DBLP, sample_metapath
-from utils.noisy_labels import apply_label_noise
+from utils.noisy_labels import apply_label_noise, SelfFiltering
 
-from config import train_cfg, model_cfg, data_cfg
+from config import exp_cfg, train_cfg, model_cfg, data_cfg
 
 if __name__ == '__main__':
 
     set_seed(0)
 
-    args = Namespace(**train_cfg)
-    if args.device_id == -1:
+    device_id = exp_cfg['device_id']
+    if device_id == -1:
         device = 'cpu'
     else:
-        device = f'cuda:{args.device_id}'
+        device = f'cuda:{device_id}'
+    args = Namespace(**train_cfg)
     args.update(**dict(device=device))
 
     # manage workdir
+    tag = exp_cfg['tag']
     project_root = osp.realpath(osp.join(osp.realpath(__file__), '..'))
-    workdir = osp.join(project_root, 'exp', args.tag)
-    os.makedirs(workdir, exist_ok=(args.tag == 'debug'))
+    workdir = osp.join(project_root, 'exp', tag)
+    os.makedirs(workdir, exist_ok=(tag == 'debug'))
     cfg_file = osp.join(workdir, 'cfg.json')
 
     log_file = osp.join(workdir, 'avg_result.log')
@@ -47,6 +49,8 @@ if __name__ == '__main__':
     node_feature_dim_list = [node_feature.shape[1] for node_feature in node_feature_list]
     node_feature_list = to_torch(node_feature_list, device)
 
+    num_train = train_indices.shape[0]
+
     # apply label noise
     LNL = data_cfg['noise_cfg'].pop('apply')
     if LNL:
@@ -57,8 +61,17 @@ if __name__ == '__main__':
         data_cfg['noise_cfg']['corruption_ratio'] = corruption_ratio
     else:
         data_cfg.pop('noise_cfg')
+        noisy_labels = None
 
     labels = to_torch(labels, device, indices=True)
+
+    SFT = train_cfg['sft_cfg'].pop('apply')
+    if SFT:
+        assert LNL
+        sft_loss_cfg = train_cfg['sft_cfg']['loss_cfg']
+    else:
+        train_cfg.pop('sft_cfg')
+        sft_loss_cfg = None
 
     # save additional information to cfg
     data_cfg['num_metapaths'] = num_metapaths
@@ -97,10 +110,12 @@ if __name__ == '__main__':
         micro_f1='Micro-F1',
     )
 
-    num_repeat = len(args.seed_list)
-    for exp_id, seed in enumerate(args.seed_list):
+    seed_list = exp_cfg['seed_list']
+    num_repeat = len(seed_list)
+    for exp_id, seed in enumerate(seed_list):
 
         set_seed(seed)
+
         log_file = osp.join(workdir, f'{seed}.log')
         logger = get_logger(f'{exp_id}_{num_repeat}_seed{seed}', log_file)
         ckpt_file = osp.join(workdir, f'ckpt_seed{seed}.pt')
@@ -125,42 +140,88 @@ if __name__ == '__main__':
         train_sampler = IndicesSampler(train_indices, args.batch_size, shuffle=True)
         val_sampler = IndicesSampler(val_indices, args.batch_size, shuffle=False)
 
+        if SFT:
+            num_nodes = np.max(train_indices) + 1
+            sft = SelfFiltering(num_nodes=num_nodes, device=device, **train_cfg['sft_cfg'])
+        else:
+            sft = None
+
         for epoch in range(args.epoch):
             t_start = time.time()
             model.train()
             train_loss_list = []
             accurate_cnt = 0
+            fluctuate_cnt = 0
             for iteration in range(train_sampler.num_iterations()):
                 indices = train_sampler()
-                metapath_sampled_list = sample_metapath(indices, metapath_list, args.sample_limit,
-                                                        keep_intermediate=False)
+                metapath_sampled_list = sample_metapath(
+                    indices, metapath_list, args.sample_limit, keep_intermediate=False
+                )
                 indices = to_torch(indices, device, indices=True)
                 metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
 
                 logits, embeddings = model(
                     indices, metapath_sampled_list, node_type_mapping, node_feature_list
                 )
-                logp = F.log_softmax(logits, 1)
+                log_prob = F.log_softmax(logits, 1)
 
                 if LNL:
                     train_labels = noisy_labels[indices]
                 else:
                     train_labels = labels[indices]
 
-                train_loss = F.nll_loss(logp, train_labels)
-                train_loss_list.append(train_loss.item())
-                accurate_cnt += torch.sum(torch.argmax(logp, dim=-1) == train_labels).item()
+                accurate_mask = (torch.argmax(log_prob, dim=-1) == train_labels)
+                if SFT:
+                    selected_indices, fluctuating_indices = sft.filter(epoch, indices, accurate_mask)
+
+                    prob = torch.exp(log_prob)
+                    confidence_threshold = sft_loss_cfg['threshold']
+                    if epoch < sft.warm_up:
+                        ce_loss = F.nll_loss(log_prob, train_labels)
+                        top2prob, top2indices = torch.topk(prob, k=2, dim=-1)
+                        pseudo_label = top2indices[:, 1]
+                        alpha = confidence_threshold - top2prob[:, 1] / top2prob[:, 0]
+                        alpha[alpha < 0] = 0
+                        confidence_penalty = torch.mean(F.cross_entropy(prob, pseudo_label) * alpha)
+                        confidence_penalty = confidence_penalty * sft_loss_cfg['penalty_weight'][0]
+                        train_loss = ce_loss + confidence_penalty
+                        print(ce_loss.item(), confidence_penalty.item())
+                    else:
+                        ce_loss = F.nll_loss(log_prob[selected_indices], train_labels[selected_indices])
+                        label_prob = prob[train_labels]
+                        pseudo_prob = confidence_threshold - prob / label_prob
+                        pseudo_prob[pseudo_prob < 0] = 0
+                        confidence_penalty = -torch.sum(log_prob * pseudo_prob) / num_node_types
+                        confidence_penalty = confidence_penalty * sft_loss_cfg['penalty_weight'][1]
+                        train_loss = ce_loss + confidence_penalty
+                        print(ce_loss.item(), confidence_penalty.item())
+
+                        # todo: add fix-watch on fluctuating
+
+                        if len(sft.memory_bank) > 0:
+                            temp = torch.logical_and(
+                                sft.memory_bank[0][indices],
+                                torch.logical_not(accurate_mask)
+                            )
+                            assert (torch.where(temp)[0] == fluctuating_indices).all()
+
+                    fluctuate_cnt += len(fluctuating_indices)
+                else:
+                    train_loss = F.nll_loss(log_prob, train_labels)
 
                 optimizer.zero_grad()
                 train_loss.backward()
                 optimizer.step()
 
+                train_loss_list.append(train_loss.item())
+                accurate_cnt += torch.sum(accurate_mask).item()
+
             scheduler.step()
             train_loss = np.mean(train_loss_list)
-            train_acc = accurate_cnt / train_indices.shape[0]
+            train_acc = accurate_cnt / num_train
 
             model.eval()
-            val_logp = []
+            val_log_prob = []
             with torch.no_grad():
                 for iteration in range(val_sampler.num_iterations()):
                     indices = val_sampler()
@@ -172,18 +233,21 @@ if __name__ == '__main__':
                     logits, embeddings = model(
                         indices, metapath_sampled_list, node_type_mapping, node_feature_list
                     )
-                    logp = F.log_softmax(logits, 1)
-                    val_logp.append(logp)
-                val_logp = torch.cat(val_logp, dim=0)
-                val_loss = F.nll_loss(val_logp, labels[val_indices]).item()
-                val_acc = torch.mean(torch.argmax(val_logp, dim=-1) == labels[val_indices], dtype=torch.float32).item()
+                    log_prob = F.log_softmax(logits, 1)
+                    val_log_prob.append(log_prob)
+                val_log_prob = torch.cat(val_log_prob, dim=0)
+                val_loss = F.nll_loss(val_log_prob, labels[val_indices]).item()
+                val_acc = torch.mean(torch.argmax(val_log_prob, dim=-1) == labels[val_indices], dtype=torch.float32).item()
             t_end = time.time()
             time_elapsed = t_end - t_start
+            fluctuate_ratio = fluctuate_cnt / num_train
             msg = f'Epoch {epoch:03d} | Time {time_elapsed:.4f}' + \
                   f' | Train_Loss {train_loss:.4f} | Train_Accuracy {train_acc:.4f}' + \
-                  f' | Val_Loss {val_loss:.4f} | Val_Accuracy {val_acc:.4f}'
+                  f' | Val_Loss {val_loss:.4f} | Val_Accuracy {val_acc:.4f}' + \
+                  f' | Fluctuate_Ratio {fluctuate_ratio:.3f}'
             logger.info(msg)
             record = dict(
+                epoch=epoch,
                 train_loss=train_loss,
                 train_acc=train_acc,
                 val_loss=val_loss,
@@ -192,14 +256,11 @@ if __name__ == '__main__':
             best_record, msg = early_stopping.record(record=record, model=model)
             logger.info(msg)
             if best_record is not None:
-                msg = []
+                msg = [f'Epoch {best_record["epoch"]:03d}']
+                best_record.pop('epoch')
                 for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc']:
                     msg.append(f'{display[term]} {best_record[term]:.6f}')
                 msg = ' | '.join(msg)
-                # record_msg = f"Train_Loss {best_record['train_loss']:.6f}" +\
-                #              f" | Train_Accuracy {best_record['train_acc']:.6f}" + \
-                #              f" | Val_Loss {best_record['val_loss']:.6f}" + \
-                #              f" | Val_Accuracy {best_record['val_acc']:.6f}"
                 logger.info(msg)
                 for key, value in best_record.items():
                     exp_results[key].append(value)

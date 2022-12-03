@@ -1,7 +1,10 @@
-train_cfg = dict(
-    tag='HAN_u0.5',
+exp_cfg = dict(
+    tag='exp4',
     seed_list=[100, 200, 300, 400, 500],
     device_id=0,
+)
+
+train_cfg = dict(
     epoch=100,
     patience=10,
     batch_size=128,
@@ -13,6 +16,15 @@ train_cfg = dict(
     scheduler_cfg=dict(
         gamma=0.95,
     ),
+    sft_cfg=dict(
+        apply=True,
+        memory=1,
+        warm_up=2,
+        loss_cfg=dict(
+            threshold=0.2,
+            penalty_weight=[0.5, 0.05],
+        ),
+    )
 )
 
 model_cfg = dict(
@@ -28,6 +40,6 @@ data_cfg = dict(
     noise_cfg=dict(
         apply=True,
         pair_flip_rate=0.0,
-        uniform_flip_rate=0.5,
+        uniform_flip_rate=0.4,
     ),
 )
