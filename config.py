@@ -13,10 +13,13 @@ exp_cfg = dict(
 train_cfg = dict(
     epoch=100,
     patience=10,
-    batch_size=64,
-    sample_limit=512,
+    # 64 for DBLP, 8 for IMDB
+    batch_size=8,
+    # 512 for DBLP, 128 for IMDB
+    sample_limit=128,
     optim_cfg=dict(
-        lr=5e-3,
+        # 5e-3 for DBLP, 2e-4 for IMDB
+        lr=2e-4,
         weight_decay=0.001,
     ),
     scheduler_cfg=dict(
@@ -35,16 +38,9 @@ train_cfg = dict(
     )
 )
 
-model_cfg = dict(
-    type='HAN',
-    node_feature_dim=64,
-    node_feature_dropout_rate=0.5,
-    num_attention_heads=8,
-    semantic_attention_dim=128,
-)
-
 data_cfg = dict(
-    dataset='DBLP',
+    # 'DBLP', 'IMDB'
+    dataset='IMDB',
     split_cfg=dict(
         split_seed=-1,
         split=[400, 400, 3257],
@@ -55,3 +51,20 @@ data_cfg = dict(
         uniform_flip_rate=0.0,
     ),
 )
+
+model_cfg = dict(
+    type='HAN',
+    node_feature_dim=64,
+    node_feature_dropout_rate=0.5,
+    num_attention_heads=8,
+    semantic_attention_dim=128,
+    type_aware_semantic=True,
+)
+
+# model_cfg = dict(
+#     type='MLP',
+#     node_feature_dim=64,
+#     node_feature_dropout_rate=0.5,
+#     num_attention_heads=8,
+#     hidden_dims=[256, 256],
+# )

@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from utils.training import parse_args, set_seed, get_logger
 from utils.training import EarlyStopping, IndicesSampler, Namespace
 from utils.evaluate import svm_test
-from utils.data import to_torch, to_np, load_DBLP, sample_metapath
+from utils.data import to_torch, to_np, load_data, sample_metapath
 from utils.noisy_labels import apply_label_noise, MemoryBank
 
 from config import exp_cfg, train_cfg, model_cfg, data_cfg
@@ -63,7 +63,13 @@ if __name__ == '__main__':
     # manage workdir
     project_root = osp.realpath(osp.join(osp.realpath(__file__), '..'))
     workdir = osp.join(project_root, 'exp', tag)
-    os.makedirs(workdir, exist_ok=debug)
+    if not debug and osp.exists(workdir):
+        print(f'Workdir exists: {workdir}')
+        print('Continue?')
+        import pdb
+        pdb.set_trace()
+    else:
+        os.makedirs(workdir, exist_ok=debug)
     cfg_file = osp.join(workdir, 'cfg.json')
 
     log_file = osp.join(workdir, 'avg_result.log')
@@ -71,13 +77,35 @@ if __name__ == '__main__':
 
     # load dataset
     dataset = data_cfg['dataset']
-    assert dataset == 'DBLP'
     metapath_list, node_feature_list, node_type_mapping, adjacency_matrix, labels, (
-        train_indices, val_indices, test_indices) = load_DBLP(project_root)
+        train_indices, val_indices, test_indices) = load_data(dataset, project_root)
+
+
+    # # 1-0
+    # metapaths = []
+    # for node_id in range(4057):
+    #     metapath = np.zeros((10, 2), dtype=np.int32)
+    #     metapath[:, 0] = np.arange(10, dtype=np.int32) + 4057
+    #     metapath[:, 1] = np.arange(10, dtype=np.int32)
+    #     metapaths.append(metapath)
+    # metapath_list.append(metapaths)
+    # # 0-1: 2 control type(failed)
+    # for metapaths in metapath_list:
+    #     metapaths.extend([np.zeros((0, 2), dtype=np.int32)] * 14328)
+    # metapaths = [np.zeros((0, 2), dtype=np.int32)] * 4057
+    # for node_id in range(14328):
+    #     metapath = np.zeros((10, 2), dtype=np.int32)
+    #     metapath[:, 0] = np.arange(10, dtype=np.int32)
+    #     metapath[:, 1] = np.arange(10, dtype=np.int32) + 4057
+    #     metapaths.append(metapath)
+    # metapath_list.append(metapaths)
+    # train_indices = np.concatenate([train_indices, np.arange(14328, dtype=np.int32) + 4057])
+    # labels = np.concatenate([labels, np.random.randint(3, size=(14328,))])
 
     num_metapaths = len(metapath_list)
+    node_type_mapping = to_torch(node_type_mapping, device=device)
     num_nodes = labels.shape[0]
-    num_node_types = np.unique(node_type_mapping).shape[0]
+    num_node_types = torch.unique(node_type_mapping).shape[0]
     node_feature_dim_list = [node_feature.shape[1] for node_feature in node_feature_list]
     node_feature_list = to_torch(node_feature_list, device)
 
@@ -89,7 +117,7 @@ if __name__ == '__main__':
     # split data
     split_seed = data_cfg['split_cfg']['split_seed']
     split = data_cfg['split_cfg']['split']
-    assert np.sum(split) == num_nodes
+    # assert np.sum(split) == num_nodes
     if split_seed != -1:
         all_indices = np.concatenate([train_indices, val_indices, test_indices])
         set_seed(split_seed)
@@ -158,6 +186,7 @@ if __name__ == '__main__':
 
     model_type = model_cfg.pop('type')
     assert model_type == 'HAN'
+    # assert model_type == 'MLP'
 
     exp_results = {}
     for key in [
@@ -198,6 +227,14 @@ if __name__ == '__main__':
             device=device,
             **model_cfg
         )
+        # from model.MLP import MLP
+        #
+        # model = MLP(
+        #     node_raw_feature_dim_list=node_feature_dim_list,
+        #     num_cls=num_node_types,
+        #     device=device,
+        #     **model_cfg
+        # )
         optimizer = torch.optim.Adam(model.parameters(), **args.optim_cfg)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, **args.scheduler_cfg)
 

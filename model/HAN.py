@@ -7,22 +7,16 @@ import dgl.nn.functional as dgl_F
 
 from typing import List
 
+
+# todo: support multiple control type
 class HAN(nn.Module):
-    def __init__(self,
-                 node_raw_feature_dim_list,
-                 node_feature_dim,
-                 node_feature_dropout_rate,
-                 num_attention_heads,
-                 num_metapaths,
-                 semantic_attention_dim,
-                 num_cls,
-                 device,
-                 leaky_relu_slope=0.01,
-                 ):
+    def __init__(
+            self, node_raw_feature_dim_list: List[int], node_feature_dim, node_feature_dropout_rate,
+            num_attention_heads, num_metapaths, semantic_attention_dim, num_cls,
+            device, type_aware_semantic=False, leaky_relu_slope=0.01,
+    ):
         super(HAN, self).__init__()
         self.device = device
-
-        # is initialization susceptible to batch dim and unlinearty choice?
 
         # node feature transform
         self.node_feature_dim = node_feature_dim
@@ -49,10 +43,23 @@ class HAN(nn.Module):
 
         # semantic level attention
         self.semantic_attention_dim = semantic_attention_dim
-        self.semantic_proj = nn.Linear(node_feature_dim * num_attention_heads, semantic_attention_dim)
-        nn.init.xavier_normal_(self.semantic_proj.weight, gain=np.sqrt(2))
-        self.semantic_attention = nn.Parameter(torch.empty((1, semantic_attention_dim)))
-        nn.init.xavier_normal_(self.semantic_attention.data, gain=np.sqrt(2))
+        self.type_aware_semantic = type_aware_semantic
+        if type_aware_semantic:
+            # node type-aware semantic projection
+            num_node_types = len(node_raw_feature_dim_list)
+            semantic_projector_list = []
+            for _ in range(num_node_types):
+                semantic_projector = nn.Linear(node_feature_dim * num_attention_heads, semantic_attention_dim)
+                nn.init.xavier_normal_(semantic_projector.weight, gain=np.sqrt(2))
+                semantic_projector_list.append(semantic_projector)
+            self.semantic_projector_list = nn.ModuleList(semantic_projector_list)
+            self.semantic_attention = nn.Parameter(torch.empty((num_node_types, 1, semantic_attention_dim)))
+            nn.init.xavier_normal_(self.semantic_attention.data, gain=np.sqrt(2))
+        else:
+            self.semantic_projector = nn.Linear(node_feature_dim * num_attention_heads, semantic_attention_dim)
+            nn.init.xavier_normal_(self.semantic_projector.weight, gain=np.sqrt(2))
+            self.semantic_attention = nn.Parameter(torch.empty((1, semantic_attention_dim)))
+            nn.init.xavier_normal_(self.semantic_attention.data, gain=np.sqrt(2))
 
         # cls head
         self.cls_head = nn.Linear(node_feature_dim * num_attention_heads, num_cls, bias=True)
@@ -61,13 +68,16 @@ class HAN(nn.Module):
         self.to(device)
         return
 
-    def forward(self, target_nodes: torch.tensor, metapath_list: List[torch.tensor],
-                node_type_mapping: np.ndarray, node_feature_list: List[torch.tensor]):
+    def forward(
+            self, target_nodes: torch.tensor, metapath_list: List[torch.tensor],
+            node_type_mapping: torch.tensor, node_feature_list: List[torch.tensor]
+    ):
         # node feature transform
         num_nodes = node_type_mapping.shape[0]
+        num_batch = target_nodes.shape[0]
         node_features = torch.zeros((num_nodes, self.node_feature_dim), device=self.device)
         for node_type, fc in enumerate(self.node_feature_projector_list):
-            node_indices = np.where(node_type_mapping == node_type)[0]
+            node_indices = torch.where(node_type_mapping == node_type)[0]
             node_features[node_indices] = fc(node_feature_list[node_type])
         node_features = self.node_feature_dropout(node_features)
 
@@ -103,16 +113,32 @@ class HAN(nn.Module):
         h_metapath = torch.stack(h_metapath)
 
         # semantic level attention
-        # utilizes 2 facts: target_nodes are same for all metapath schemes, and are in the same node type
+        # all metapath schemes share the same target_node set(guaranteed by sample policy)
         beta = []
         for metapath_id in range(self.num_metapaths):
-            # (batch, feat)
-            metapath_attention = self.semantic_proj(
-                h_metapath[metapath_id].view(-1, self.node_feature_dim * self.num_attention_heads)
-            )
-            metapath_attention = torch.tanh(metapath_attention)
-            # -> (batch, 1)
-            metapath_attention = torch.sum(self.semantic_attention * metapath_attention, dim=-1, keepdim=True)
+            if self.type_aware_semantic:
+                # (batch, 1)
+                metapath_attention = torch.zeros((num_batch, 1), device=self.device)
+                for node_type, fc in enumerate(self.semantic_projector_list):
+                    node_indices = torch.where(node_type_mapping[target_nodes] == node_type)[0]
+                    # (mask, feat)
+                    aux = fc(
+                        h_metapath[metapath_id, node_indices].view(-1, self.node_feature_dim * self.num_attention_heads)
+                    )
+                    aux = torch.tanh(aux)
+                    # -> (mask, 1)
+                    metapath_attention[node_indices] = torch.sum(
+                        self.semantic_attention[node_type] * aux, dim=-1, keepdim=True
+                    )
+            else:
+                # (batch, feat)
+                metapath_attention = self.semantic_projector(
+                    h_metapath[metapath_id].view(-1, self.node_feature_dim * self.num_attention_heads)
+                )
+                metapath_attention = torch.tanh(metapath_attention)
+                # -> (batch, 1)
+                metapath_attention = torch.sum(self.semantic_attention * metapath_attention, dim=-1, keepdim=True)
+            # -> (1, 1)
             metapath_attention = torch.mean(metapath_attention, dim=0, keepdim=True)
             beta.append(metapath_attention)
         # (path, 1, 1)
