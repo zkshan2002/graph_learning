@@ -24,7 +24,7 @@ def apply_label_noise(labels: np.ndarray, pair_flip_rate, uniform_flip_rate):
     return noisy_labels, is_corrupted
 
 
-class SelfFiltering:
+class MemoryBank:
     def __init__(self, num_nodes, memory, warm_up, device, **kwargs):
         self.num_nodes = num_nodes
         self.memory = memory
@@ -64,7 +64,7 @@ class SelfFiltering:
 
 
 def debug_sft():
-    sft = SelfFiltering(16, 2, 1, 'cpu')
+    sft = MemoryBank(16, 2, 1, 'cpu')
 
     indice_list = list(torch.arange(16, dtype=torch.int64).view(4, 4))
 

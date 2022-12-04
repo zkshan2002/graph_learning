@@ -1,13 +1,19 @@
 exp_cfg = dict(
-    tag='exp4',
+    tag='debug',
+    description='',
     seed_list=[100, 200, 300, 400, 500],
     device_id=0,
+    evaluate_cfg=dict(
+      svm_cfg=dict(
+          train_ratio_list=[0.8],
+      )
+    ),
 )
 
 train_cfg = dict(
     epoch=100,
     patience=10,
-    batch_size=128,
+    batch_size=32,
     sample_limit=100,
     optim_cfg=dict(
         lr=5e-3,
@@ -17,9 +23,11 @@ train_cfg = dict(
         gamma=0.95,
     ),
     sft_cfg=dict(
-        apply=True,
-        memory=1,
-        warm_up=2,
+        apply=False,
+        mb_cfg=dict(
+            memory=1,
+            warm_up=2,
+        ),
         loss_cfg=dict(
             threshold=0.2,
             penalty_weight=[0.5, 0.05],
@@ -38,8 +46,8 @@ model_cfg = dict(
 data_cfg = dict(
     dataset='DBLP',
     noise_cfg=dict(
-        apply=True,
+        apply=False,
         pair_flip_rate=0.0,
-        uniform_flip_rate=0.4,
+        uniform_flip_rate=0.0,
     ),
 )

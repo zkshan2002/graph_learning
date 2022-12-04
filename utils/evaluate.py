@@ -22,19 +22,19 @@ def svm_test(embeddings, labels, seed, train_ratio_list, num_repeat=10):
             svm.fit(X_train, y_train)
             y_pred = svm.predict(X_test)
             macro_f1 = f1_score(y_test, y_pred, average='macro')
-            micro_f1 = f1_score(y_test, y_pred, average='micro')
             macro_f1_list.append(macro_f1)
+            micro_f1 = f1_score(y_test, y_pred, average='micro')
             micro_f1_list.append(micro_f1)
         macro_f1_mean.append((np.mean(macro_f1_list)))
         macro_f1_std.append((np.std(macro_f1_list)))
         micro_f1_mean.append((np.mean(micro_f1_list)))
         micro_f1_std.append((np.std(micro_f1_list)))
-    macro_f1_msg = 'Macro-F1: ' + '|'.join([
-        f'{macro_f1_mean[i]:.6f}~{macro_f1_std[i]:.6f} ({train_ratio_list[i]:.1f})'
+    macro_f1_msg = 'Macro-F1: ' + ' | '.join([
+        f'{macro_f1_mean[i]:.6f} ~ {macro_f1_std[i]:.6f} ({train_ratio_list[i]:.1f})'
         for i in range(len(train_ratio_list))
     ])
-    micro_f1_msg = 'Micro-F1: ' + '|'.join([
-        f'{micro_f1_mean[i]:.6f}~{micro_f1_std[i]:.6f} ({train_ratio_list[i]:.1f})'
+    micro_f1_msg = 'Micro-F1: ' + ' | '.join([
+        f'{micro_f1_mean[i]:.6f} ~ {micro_f1_std[i]:.6f} ({train_ratio_list[i]:.1f})'
         for i in range(len(train_ratio_list))
     ])
     result_dict = dict(
@@ -46,7 +46,7 @@ def svm_test(embeddings, labels, seed, train_ratio_list, num_repeat=10):
         micro_f1=dict(
             mean=micro_f1_mean,
             std=micro_f1_std,
-            msg=micro_f1_msg
-        )
+            msg=micro_f1_msg,
+        ),
     )
     return result_dict

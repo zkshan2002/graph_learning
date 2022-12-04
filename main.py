@@ -12,13 +12,44 @@ from utils.training import parse_args, set_seed, get_logger
 from utils.training import EarlyStopping, IndicesSampler, Namespace
 from utils.evaluate import svm_test
 from utils.data import to_torch, to_np, load_DBLP, sample_metapath
-from utils.noisy_labels import apply_label_noise, SelfFiltering
+from utils.noisy_labels import apply_label_noise, MemoryBank
 
 from config import exp_cfg, train_cfg, model_cfg, data_cfg
 
 if __name__ == '__main__':
 
+    exp_start_timer = time.time()
     set_seed(0)
+
+    # override cfg with args
+    args = parse_args()
+    if hasattr(args, 'tag') and args.tag is not None:
+        exp_cfg['tag'] = args.tag
+    if hasattr(args, 'description') and args.description is not None:
+        exp_cfg['description'] = args.description
+    if hasattr(args, 'seed_list') and args.seed_list is not None:
+        exp_cfg['seed_list'] = args.seed_list
+    if hasattr(args, 'noise_p') and args.noise_p is not None:
+        data_cfg['noise_cfg']['pair_flip_rate'] = args.noise_p
+        data_cfg['noise_cfg']['apply'] = True
+    if hasattr(args, 'noise_u') and args.noise_u is not None:
+        data_cfg['noise_cfg']['uniform_flip_rate'] = args.noise_u
+        data_cfg['noise_cfg']['apply'] = True
+    if hasattr(args, 'sft_mb_warmup') and args.sft_mb_warmup is not None:
+        train_cfg['sft_cfg']['mb_cfg']['sft_mb_warmup'] = args.sft_mb_warmup
+        train_cfg['sft_cfg']['apply'] = True
+    if hasattr(args, 'sft_loss_threshold') and args.sft_loss_threshold is not None:
+        train_cfg['sft_cfg']['loss_cfg']['threshold'] = args.sft_loss_threshold
+        train_cfg['sft_cfg']['apply'] = True
+    if hasattr(args, 'sft_loss_weights') and args.sft_loss_weights is not None:
+        train_cfg['sft_cfg']['loss_cfg']['penalty_weight'] = args.sft_loss_weights
+        train_cfg['sft_cfg']['apply'] = True
+
+    tag = exp_cfg['tag']
+    debug = (tag == 'debug')
+    if debug:
+        exp_cfg['seed_list'] = [100, 200]
+        train_cfg['patience'] = 2
 
     device_id = exp_cfg['device_id']
     if device_id == -1:
@@ -29,10 +60,9 @@ if __name__ == '__main__':
     args.update(**dict(device=device))
 
     # manage workdir
-    tag = exp_cfg['tag']
     project_root = osp.realpath(osp.join(osp.realpath(__file__), '..'))
     workdir = osp.join(project_root, 'exp', tag)
-    os.makedirs(workdir, exist_ok=(tag == 'debug'))
+    os.makedirs(workdir, exist_ok=debug)
     cfg_file = osp.join(workdir, 'cfg.json')
 
     log_file = osp.join(workdir, 'avg_result.log')
@@ -83,6 +113,7 @@ if __name__ == '__main__':
     )
 
     all_cfg = dict(
+        exp=exp_cfg,
         train=train_cfg,
         model=model_cfg,
         data=data_cfg,
@@ -113,7 +144,6 @@ if __name__ == '__main__':
     seed_list = exp_cfg['seed_list']
     num_repeat = len(seed_list)
     for exp_id, seed in enumerate(seed_list):
-
         set_seed(seed)
 
         log_file = osp.join(workdir, f'{seed}.log')
@@ -142,16 +172,16 @@ if __name__ == '__main__':
 
         if SFT:
             num_nodes = np.max(train_indices) + 1
-            sft = SelfFiltering(num_nodes=num_nodes, device=device, **train_cfg['sft_cfg'])
+            memory_bank = MemoryBank(num_nodes=num_nodes, device=device, **train_cfg['sft_cfg']['mb_cfg'])
         else:
-            sft = None
+            memory_bank = None
 
         for epoch in range(args.epoch):
-            t_start = time.time()
             model.train()
             train_loss_list = []
             accurate_cnt = 0
             fluctuate_cnt = 0
+            epoch_start_timer = time.time()
             for iteration in range(train_sampler.num_iterations()):
                 indices = train_sampler()
                 metapath_sampled_list = sample_metapath(
@@ -172,11 +202,11 @@ if __name__ == '__main__':
 
                 accurate_mask = (torch.argmax(log_prob, dim=-1) == train_labels)
                 if SFT:
-                    selected_indices, fluctuating_indices = sft.filter(epoch, indices, accurate_mask)
+                    selected_indices, fluctuating_indices = memory_bank.filter(epoch, indices, accurate_mask)
 
                     prob = torch.exp(log_prob)
                     confidence_threshold = sft_loss_cfg['threshold']
-                    if epoch < sft.warm_up:
+                    if epoch < memory_bank.warm_up:
                         ce_loss = F.nll_loss(log_prob, train_labels)
                         top2prob, top2indices = torch.topk(prob, k=2, dim=-1)
                         pseudo_label = top2indices[:, 1]
@@ -198,9 +228,10 @@ if __name__ == '__main__':
 
                         # todo: add fix-watch on fluctuating
 
-                        if len(sft.memory_bank) > 0:
+                        # for debug only, when memory=1
+                        if len(memory_bank.memory_bank) > 0:
                             temp = torch.logical_and(
-                                sft.memory_bank[0][indices],
+                                memory_bank.memory_bank[0][indices],
                                 torch.logical_not(accurate_mask)
                             )
                             assert (torch.where(temp)[0] == fluctuating_indices).all()
@@ -237,14 +268,16 @@ if __name__ == '__main__':
                     val_log_prob.append(log_prob)
                 val_log_prob = torch.cat(val_log_prob, dim=0)
                 val_loss = F.nll_loss(val_log_prob, labels[val_indices]).item()
-                val_acc = torch.mean(torch.argmax(val_log_prob, dim=-1) == labels[val_indices], dtype=torch.float32).item()
-            t_end = time.time()
-            time_elapsed = t_end - t_start
+                val_acc = torch.mean(torch.argmax(val_log_prob, dim=-1) == labels[val_indices],
+                                     dtype=torch.float32).item()
+            epoch_end_timer = time.time()
+            epoch_time = epoch_end_timer - epoch_start_timer
             fluctuate_ratio = fluctuate_cnt / num_train
-            msg = f'Epoch {epoch:03d} | Time {time_elapsed:.4f}' + \
+            msg = f'Epoch {epoch:03d} | Time {epoch_time:.4f}' + \
                   f' | Train_Loss {train_loss:.4f} | Train_Accuracy {train_acc:.4f}' + \
-                  f' | Val_Loss {val_loss:.4f} | Val_Accuracy {val_acc:.4f}' + \
-                  f' | Fluctuate_Ratio {fluctuate_ratio:.3f}'
+                  f' | Val_Loss {val_loss:.4f} | Val_Accuracy {val_acc:.4f}'
+            if SFT:
+                msg += f' | Fluctuate_Ratio {fluctuate_ratio:.3f}'
             logger.info(msg)
             record = dict(
                 epoch=epoch,
@@ -266,8 +299,8 @@ if __name__ == '__main__':
                     exp_results[key].append(value)
                 break
 
+        test_start_timer = time.time()
         test_sampler = IndicesSampler(test_indices, args.batch_size, shuffle=False)
-
         model.load_state_dict(torch.load(ckpt_file))
         model.eval()
         test_logits = []
@@ -289,42 +322,51 @@ if __name__ == '__main__':
             test_logits = torch.cat(test_logits, dim=0)
             test_embeddings = torch.cat(test_embeddings, dim=0)
             test_acc = torch.mean(torch.argmax(test_logits, dim=-1) == labels[test_indices], dtype=torch.float32).item()
-
+        test_end_timer = time.time()
+        test_time = test_end_timer - test_start_timer
         exp_results['test_acc'].append(test_acc)
-        msg = f'Test_Accuracy {test_acc:.6f}'
+        msg = f'Test | Time {test_time:.4f} | Test_Accuracy {test_acc:.6f}'
         logger.info(msg)
 
         test_embeddings = to_np(test_embeddings)
         test_labels = to_np(labels[test_indices])
-        train_ratio_list = [0.8, 0.6, 0.4, 0.2]
+        train_ratio_list = exp_cfg['evaluate_cfg']['svm_cfg']['train_ratio_list']
+
+        test_start_timer = time.time()
         svm_results = svm_test(test_embeddings, test_labels, seed, train_ratio_list=train_ratio_list)
+        test_end_timer = time.time()
+        test_time = test_end_timer - test_start_timer
+        msg = f'SVM Test | Time {test_time:.4f}'
+        logger.info(msg)
 
-        for key, value in svm_results.items():
+        for key in ['macro_f1', 'micro_f1']:
+            value = svm_results[key]
             exp_results[key].append(value['mean'])
+            logger.info(value['msg'])
 
-        record_msg = '\n'.join([value['msg'] for value in svm_results.values()])
-        logger.info(record_msg)
+        exp_end_timer = time.time()
+        exp_time = exp_end_timer - exp_start_timer
+        msg = f'Exp {exp_id} / {num_repeat} ends | Total Time {exp_time:.4f}'
+        logger.info(msg)
 
-    for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc', 'test_acc']:
-        result = exp_results[term]
+
+    def display_result(result, term, logger, display_postfix=''):
         msg = ' | '.join([f'{num:.6f}' for num in result])
-        msg = f'{display[term]}: {msg}'
-        logger_result.info(msg)
+        msg = f'{display[term] + display_postfix}: {msg}'
+        logger.info(msg)
         mean = np.mean(result)
         std = np.std(result)
-        msg = f'{display[term]} Summary: {mean:.6f} ~ {std:.6f}'
-        logger_result.info(msg)
+        msg = f'{display[term] + display_postfix} Summary: {mean:.4f} ~ {std:.4f}'
+        logger.info(msg)
+        return
 
-    train_ratio_list = [0.8, 0.6, 0.4, 0.2]
+
+    for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc', 'test_acc']:
+        display_result(exp_results[term], term, logger_result)
+
+    train_ratio_list = exp_cfg['evaluate_cfg']['svm_cfg']['train_ratio_list']
     for term in ['macro_f1', 'micro_f1']:
         results = np.array(exp_results[term])
         msg = []
         for index, train_ratio in enumerate(train_ratio_list):
-            result = results[:, index]
-            msg = ' | '.join([f'{num:.6f}' for num in result])
-            msg = f'{display[term]}({train_ratio:.1f}): {msg}'
-            logger_result.info(msg)
-            mean = np.mean(result)
-            std = np.std(result)
-            msg = f'{display[term]}({train_ratio:.1f}) Summary: {mean:.6f} ~ {std:.6f}'
-            logger_result.info(msg)
+            display_result(results[:, index], term, logger_result, display_postfix=f'({train_ratio:.1f})')
