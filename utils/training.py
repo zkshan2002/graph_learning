@@ -28,6 +28,8 @@ def parse_args():
     ap.add_argument('--tag', type=str, default='debug')
     ap.add_argument('--description', type=str, default='')
     ap.add_argument('--seed_list', nargs='+', type=int)
+    ap.add_argument('--batch_size', type=int)
+    ap.add_argument('--sample_limit', type=int)
     ap.add_argument('--noise_p', type=float)
     ap.add_argument('--noise_u', type=float)
     ap.add_argument('--sft_mb_warmup', type=int)

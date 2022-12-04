@@ -18,9 +18,6 @@ from config import exp_cfg, train_cfg, model_cfg, data_cfg
 
 if __name__ == '__main__':
 
-    exp_start_timer = time.time()
-    set_seed(0)
-
     # override cfg with args
     args = parse_args()
     if hasattr(args, 'tag') and args.tag is not None:
@@ -29,6 +26,10 @@ if __name__ == '__main__':
         exp_cfg['description'] = args.description
     if hasattr(args, 'seed_list') and args.seed_list is not None:
         exp_cfg['seed_list'] = args.seed_list
+    if hasattr(args, 'batch_size') and args.batch_size is not None:
+        train_cfg['batch_size'] = args.batch_size
+    if hasattr(args, 'sample_limit') and args.sample_limit is not None:
+        train_cfg['sample_limit'] = args.sample_limit
     if hasattr(args, 'noise_p') and args.noise_p is not None:
         data_cfg['noise_cfg']['pair_flip_rate'] = args.noise_p
         data_cfg['noise_cfg']['apply'] = True
@@ -75,9 +76,52 @@ if __name__ == '__main__':
         train_indices, val_indices, test_indices) = load_DBLP(project_root)
 
     num_metapaths = len(metapath_list)
+    num_nodes = labels.shape[0]
     num_node_types = np.unique(node_type_mapping).shape[0]
     node_feature_dim_list = [node_feature.shape[1] for node_feature in node_feature_list]
     node_feature_list = to_torch(node_feature_list, device)
+
+    # metapath_cnt = np.zeros((num_metapaths, num_nodes), dtype=np.int32)
+    # for metapath_id, metapaths in enumerate(metapath_list):
+    #     for node, metapath in enumerate(metapaths):
+    #         metapath_cnt[metapath_id, node] = metapath.shape[0]
+
+    # split data
+    split_seed = data_cfg['split_cfg']['split_seed']
+    split = data_cfg['split_cfg']['split']
+    assert np.sum(split) == num_nodes
+    if split_seed != -1:
+        all_indices = np.concatenate([train_indices, val_indices, test_indices])
+        set_seed(split_seed)
+        np.random.shuffle(all_indices)
+        train_indices = all_indices[:split[0]]
+        val_indices = all_indices[split[0]:split[0] + split[1]]
+        test_indices = all_indices[split[0] + split[1]:]
+    data_cfg['split_cfg']['node_type_cnt'] = {}
+    for indices, name in zip([train_indices, val_indices, test_indices], ['train', 'val', 'test']):
+        label = labels[indices]
+        type_cnt = []
+        for i in range(num_node_types):
+            type_cnt.append(np.where(label == i)[0].shape[0])
+        data_cfg['split_cfg']['node_type_cnt'][name] = type_cnt
+
+    # while 1:
+    #     shuffle_seed = np.random.randint(2 ** 31 - 1)
+    #     print(f'shuffle seed: {shuffle_seed}')
+    #     set_seed(shuffle_seed)
+    #     all_indices = np.concatenate([train_indices, val_indices, test_indices])
+    #     np.random.shuffle(all_indices)
+    #     train_indices = all_indices[0:400]
+    #     val_indices = all_indices[400:800]
+    #     test_indices = all_indices[800:]
+    #     for indices, name in zip([train_indices, val_indices, test_indices], ['train', 'val', 'test']):
+    #         label = labels[indices]
+    #         type_cnt = []
+    #         for i in range(4):
+    #             type_cnt.append(np.where(label == i)[0].shape[0])
+    #         print(f'{name}: {type_cnt}')
+    #     import pdb
+    #     pdb.set_trace()
 
     num_train = train_indices.shape[0]
 
@@ -103,15 +147,6 @@ if __name__ == '__main__':
         train_cfg.pop('sft_cfg')
         sft_loss_cfg = None
 
-    # save additional information to cfg
-    data_cfg['num_metapaths'] = num_metapaths
-    data_cfg['num_node_types'] = num_node_types
-    data_cfg['indices'] = dict(
-        train=train_indices.shape[0],
-        val=val_indices.shape[0],
-        test=test_indices.shape[0],
-    )
-
     all_cfg = dict(
         exp=exp_cfg,
         train=train_cfg,
@@ -127,7 +162,7 @@ if __name__ == '__main__':
     exp_results = {}
     for key in [
         'train_loss', 'train_acc', 'val_loss', 'val_acc', 'test_acc',
-        'macro_f1', 'micro_f1'
+        'macro_f1', 'micro_f1', 'time_elapsed'
     ]:
         exp_results[key] = []
 
@@ -139,15 +174,18 @@ if __name__ == '__main__':
         test_acc='Test_Accuracy',
         macro_f1='Macro-F1',
         micro_f1='Micro-F1',
+        time_elapsed='Time_Elapsed',
     )
 
     seed_list = exp_cfg['seed_list']
     num_repeat = len(seed_list)
-    for exp_id, seed in enumerate(seed_list):
+    for run_id, seed in enumerate(seed_list):
+
+        run_start_timer = time.time()
         set_seed(seed)
 
         log_file = osp.join(workdir, f'{seed}.log')
-        logger = get_logger(f'{exp_id}_{num_repeat}_seed{seed}', log_file)
+        logger = get_logger(f'{run_id}_{num_repeat}_seed{seed}', log_file)
         ckpt_file = osp.join(workdir, f'ckpt_seed{seed}.pt')
 
         # build model
@@ -253,23 +291,26 @@ if __name__ == '__main__':
 
             model.eval()
             val_log_prob = []
-            with torch.no_grad():
-                for iteration in range(val_sampler.num_iterations()):
-                    indices = val_sampler()
-                    metapath_sampled_list = sample_metapath(indices, metapath_list, args.sample_limit,
-                                                            keep_intermediate=False)
-                    indices = to_torch(indices, device, indices=True)
-                    metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
+            for iteration in range(val_sampler.num_iterations()):
+                indices = val_sampler()
+                metapath_sampled_list = sample_metapath(
+                    indices, metapath_list, args.sample_limit, keep_intermediate=False
+                )
+                indices = to_torch(indices, device, indices=True)
+                metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
 
+                with torch.no_grad():
                     logits, embeddings = model(
                         indices, metapath_sampled_list, node_type_mapping, node_feature_list
                     )
                     log_prob = F.log_softmax(logits, 1)
-                    val_log_prob.append(log_prob)
+                val_log_prob.append(log_prob)
+            with torch.no_grad():
                 val_log_prob = torch.cat(val_log_prob, dim=0)
-                val_loss = F.nll_loss(val_log_prob, labels[val_indices]).item()
-                val_acc = torch.mean(torch.argmax(val_log_prob, dim=-1) == labels[val_indices],
-                                     dtype=torch.float32).item()
+                val_loss = F.nll_loss(val_log_prob, labels[val_indices])
+                val_acc = torch.mean(torch.argmax(val_log_prob, dim=-1) == labels[val_indices], dtype=torch.float32)
+            val_loss = val_loss.item()
+            val_acc = val_acc.item()
             epoch_end_timer = time.time()
             epoch_time = epoch_end_timer - epoch_start_timer
             fluctuate_ratio = fluctuate_cnt / num_train
@@ -302,26 +343,30 @@ if __name__ == '__main__':
         test_start_timer = time.time()
         test_sampler = IndicesSampler(test_indices, args.batch_size, shuffle=False)
         model.load_state_dict(torch.load(ckpt_file))
+        os.remove(ckpt_file)
         model.eval()
         test_logits = []
         test_embeddings = []
-        with torch.no_grad():
-            for iteration in range(test_sampler.num_iterations()):
-                indices = test_sampler()
-                metapath_sampled_list = sample_metapath(indices, metapath_list, args.sample_limit,
-                                                        keep_intermediate=False)
-                indices = to_torch(indices, device, indices=True)
-                metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
+        for iteration in range(test_sampler.num_iterations()):
+            indices = test_sampler()
+            metapath_sampled_list = sample_metapath(
+                indices, metapath_list, args.sample_limit, keep_intermediate=False
+            )
+            indices = to_torch(indices, device, indices=True)
+            metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
 
+            with torch.no_grad():
                 logits, embeddings = model(
                     indices, metapath_sampled_list, node_type_mapping, node_feature_list
                 )
 
-                test_logits.append(logits)
-                test_embeddings.append(embeddings)
+            test_logits.append(logits)
+            test_embeddings.append(embeddings)
+        with torch.no_grad():
             test_logits = torch.cat(test_logits, dim=0)
             test_embeddings = torch.cat(test_embeddings, dim=0)
-            test_acc = torch.mean(torch.argmax(test_logits, dim=-1) == labels[test_indices], dtype=torch.float32).item()
+            test_acc = torch.mean(torch.argmax(test_logits, dim=-1) == labels[test_indices], dtype=torch.float32)
+        test_acc = test_acc.item()
         test_end_timer = time.time()
         test_time = test_end_timer - test_start_timer
         exp_results['test_acc'].append(test_acc)
@@ -344,9 +389,10 @@ if __name__ == '__main__':
             exp_results[key].append(value['mean'])
             logger.info(value['msg'])
 
-        exp_end_timer = time.time()
-        exp_time = exp_end_timer - exp_start_timer
-        msg = f'Exp {exp_id} / {num_repeat} ends | Total Time {exp_time:.4f}'
+        run_end_timer = time.time()
+        time_elapsed = run_end_timer - run_start_timer
+        exp_results['time_elapsed'].append(time_elapsed)
+        msg = f'Run {run_id} / {num_repeat} Ended | Time_elapsed {time_elapsed:.4f}'
         logger.info(msg)
 
 
@@ -361,12 +407,15 @@ if __name__ == '__main__':
         return
 
 
-    for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc', 'test_acc']:
+    for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc']:
         display_result(exp_results[term], term, logger_result)
-
+    logger_result.info('__________Results__________')
     train_ratio_list = exp_cfg['evaluate_cfg']['svm_cfg']['train_ratio_list']
     for term in ['macro_f1', 'micro_f1']:
         results = np.array(exp_results[term])
         msg = []
         for index, train_ratio in enumerate(train_ratio_list):
             display_result(results[:, index], term, logger_result, display_postfix=f'({train_ratio:.1f})')
+
+    for term in ['test_acc', 'time_elapsed']:
+        display_result(exp_results[term], term, logger_result)
