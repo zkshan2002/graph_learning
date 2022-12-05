@@ -2,7 +2,8 @@ import numpy as np
 import torch
 
 
-def apply_label_noise(labels: np.ndarray, pair_flip_rate, uniform_flip_rate):
+def apply_label_noise(labels: np.ndarray, pair_flip_rate, uniform_flip_rate, seed):
+    np.random.seed(seed)
     num_labels = labels.shape[0]
     num_cls = np.max(labels) + 1
     noisy_labels = np.copy(labels)
@@ -29,10 +30,10 @@ def apply_label_noise(labels: np.ndarray, pair_flip_rate, uniform_flip_rate):
 
 
 class MemoryBank:
-    def __init__(self, num_nodes, memory, warm_up, device, **kwargs):
+    def __init__(self, num_nodes, memory, warmup, device, **kwargs):
         self.num_nodes = num_nodes
         self.memory = memory
-        self.warm_up = warm_up
+        self.warmup = warmup
         self.device = device
 
         self.memory_bank = []
@@ -50,7 +51,7 @@ class MemoryBank:
             self.buffer[:] = 0
         self.buffer[indices] = accurate_mask
 
-        if epoch >= self.warm_up:
+        if epoch >= self.warmup:
             for index in range(len(self.memory_bank) + 1):
                 correct = torch.zeros_like(mask)
                 for memory in self.memory_bank[:index]:

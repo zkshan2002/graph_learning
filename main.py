@@ -36,15 +36,19 @@ if __name__ == '__main__':
     if hasattr(args, 'noise_u') and args.noise_u is not None:
         data_cfg['noise_cfg']['uniform_flip_rate'] = args.noise_u
         data_cfg['noise_cfg']['apply'] = True
-    if hasattr(args, 'sft_mb_warmup') and args.sft_mb_warmup is not None:
-        train_cfg['sft_cfg']['mb_cfg']['sft_mb_warmup'] = args.sft_mb_warmup
-        train_cfg['sft_cfg']['apply'] = True
+
+    if hasattr(args, 'sft_filtering_memory') and args.sft_filtering_memory is not None:
+        train_cfg['sft_cfg']['filtering_cfg']['memory'] = args.sft_filtering_memory
+        train_cfg['sft_cfg']['apply_filtering'] = True
+    if hasattr(args, 'sft_filtering_warmup') and args.sft_filtering_warmup is not None:
+        train_cfg['sft_cfg']['filtering_cfg']['warmup'] = args.sft_filtering_warmup
+        train_cfg['sft_cfg']['apply_filtering'] = True
     if hasattr(args, 'sft_loss_threshold') and args.sft_loss_threshold is not None:
         train_cfg['sft_cfg']['loss_cfg']['threshold'] = args.sft_loss_threshold
-        train_cfg['sft_cfg']['apply'] = True
+        train_cfg['sft_cfg']['apply_loss'] = True
     if hasattr(args, 'sft_loss_weights') and args.sft_loss_weights is not None:
-        train_cfg['sft_cfg']['loss_cfg']['penalty_weight'] = args.sft_loss_weights
-        train_cfg['sft_cfg']['apply'] = True
+        train_cfg['sft_cfg']['loss_cfg']['weight'] = args.sft_loss_weights
+        train_cfg['sft_cfg']['apply_loss'] = True
 
     tag = exp_cfg['tag']
     debug = (tag == 'debug')
@@ -115,16 +119,28 @@ if __name__ == '__main__':
     #         metapath_cnt[metapath_id, node] = metapath.shape[0]
 
     # split data
-    split_seed = data_cfg['split_cfg']['split_seed']
-    split = data_cfg['split_cfg']['split']
-    # assert np.sum(split) == num_nodes
-    if split_seed != -1:
-        all_indices = np.concatenate([train_indices, val_indices, test_indices])
+    all_indices = np.concatenate([train_indices, val_indices, test_indices])
+    num_total = all_indices.shape[0]
+    re_split = data_cfg['split_cfg'].pop('apply')
+    if re_split:
+        split_seed = data_cfg['split_cfg']['seed']
+        split_ratio = data_cfg['split_cfg']['split_ratio']
+        num_train = int(num_total * split_ratio[0])
+        num_val = int(num_total * split_ratio[1])
+        num_test = num_total - num_train - num_val
         set_seed(split_seed)
         np.random.shuffle(all_indices)
-        train_indices = all_indices[:split[0]]
-        val_indices = all_indices[split[0]:split[0] + split[1]]
-        test_indices = all_indices[split[0] + split[1]:]
+        train_indices = all_indices[:num_train]
+        val_indices = all_indices[num_train:num_train + num_val]
+        test_indices = all_indices[num_train + num_val:]
+    else:
+        num_train = train_indices.shape[0]
+        num_val = val_indices.shape[0]
+        num_test = test_indices.shape[0]
+        data_cfg['split_cfg'].pop('seed')
+        split_ratio = np.array([num_train, num_val, num_test], dtype=np.float32)
+        split_ratio /= np.sum(split_ratio)
+        data_cfg['split_cfg']['split_ratio'] = list(split_ratio)
     data_cfg['split_cfg']['node_type_cnt'] = {}
     for indices, name in zip([train_indices, val_indices, test_indices], ['train', 'val', 'test']):
         label = labels[indices]
@@ -151,8 +167,6 @@ if __name__ == '__main__':
     #     import pdb
     #     pdb.set_trace()
 
-    num_train = train_indices.shape[0]
-
     # apply label noise
     LNL = data_cfg['noise_cfg'].pop('apply')
     if LNL:
@@ -167,13 +181,21 @@ if __name__ == '__main__':
 
     labels = to_torch(labels, device, indices=True)
 
-    SFT = train_cfg['sft_cfg'].pop('apply')
-    if SFT:
+    # [SFT]
+    sft_cfg = train_cfg.pop('sft_cfg')
+    apply_sft = {'apply': False}
+    for key in ['filtering', 'loss', 'fixmatch']:
+        if sft_cfg[f'apply_{key}']:
+            apply_sft[key] = True
+            apply_sft['apply'] = True
+        else:
+            apply_sft[key] = False
+            sft_cfg.pop(f'{key}_cfg')
+    if apply_sft['apply']:
         assert LNL
-        sft_loss_cfg = train_cfg['sft_cfg']['loss_cfg']
-    else:
-        train_cfg.pop('sft_cfg')
-        sft_loss_cfg = None
+        train_cfg['sft_cfg'] = sft_cfg
+    if apply_sft['loss'] or apply_sft['fixmatch']:
+        assert apply_sft['filtering']
 
     all_cfg = dict(
         exp=exp_cfg,
@@ -245,9 +267,8 @@ if __name__ == '__main__':
         train_sampler = IndicesSampler(train_indices, args.batch_size, shuffle=True)
         val_sampler = IndicesSampler(val_indices, args.batch_size, shuffle=False)
 
-        if SFT:
-            num_nodes = np.max(train_indices) + 1
-            memory_bank = MemoryBank(num_nodes=num_nodes, device=device, **train_cfg['sft_cfg']['mb_cfg'])
+        if apply_sft['filtering']:
+            memory_bank = MemoryBank(num_nodes=num_nodes, device=device, **sft_cfg['filtering_cfg'])
         else:
             memory_bank = None
 
@@ -276,42 +297,57 @@ if __name__ == '__main__':
                     train_labels = labels[indices]
 
                 accurate_mask = (torch.argmax(log_prob, dim=-1) == train_labels)
-                if SFT:
+
+                if apply_sft['filtering']:
                     selected_indices, fluctuating_indices = memory_bank.filter(epoch, indices, accurate_mask)
 
-                    prob = torch.exp(log_prob)
-                    confidence_threshold = sft_loss_cfg['threshold']
-                    if epoch < memory_bank.warm_up:
-                        ce_loss = F.nll_loss(log_prob, train_labels)
-                        top2prob, top2indices = torch.topk(prob, k=2, dim=-1)
-                        pseudo_label = top2indices[:, 1]
-                        alpha = confidence_threshold - top2prob[:, 1] / top2prob[:, 0]
-                        alpha[alpha < 0] = 0
-                        confidence_penalty = torch.mean(F.cross_entropy(prob, pseudo_label) * alpha)
-                        confidence_penalty = confidence_penalty * sft_loss_cfg['penalty_weight'][0]
-                        train_loss = ce_loss + confidence_penalty
-                        print(ce_loss.item(), confidence_penalty.item())
-                    else:
-                        ce_loss = F.nll_loss(log_prob[selected_indices], train_labels[selected_indices])
-                        label_prob = prob[train_labels]
-                        pseudo_prob = confidence_threshold - prob / label_prob
-                        pseudo_prob[pseudo_prob < 0] = 0
-                        confidence_penalty = -torch.sum(log_prob * pseudo_prob) / num_node_types
-                        confidence_penalty = confidence_penalty * sft_loss_cfg['penalty_weight'][1]
-                        train_loss = ce_loss + confidence_penalty
-                        print(ce_loss.item(), confidence_penalty.item())
-
-                        # todo: add fix-watch on fluctuating
-
-                        # for debug only, when memory=1
-                        if len(memory_bank.memory_bank) > 0:
-                            temp = torch.logical_and(
-                                memory_bank.memory_bank[0][indices],
-                                torch.logical_not(accurate_mask)
-                            )
-                            assert (torch.where(temp)[0] == fluctuating_indices).all()
-
                     fluctuate_cnt += len(fluctuating_indices)
+                    # for debug only, when memory=1
+                    # if len(memory_bank.memory_bank) > 0 and epoch >= memory_bank.warmup:
+                    #     temp = torch.logical_and(
+                    #         memory_bank.memory_bank[0][indices],
+                    #         torch.logical_not(accurate_mask)
+                    #     )
+                    #     assert (torch.where(temp)[0] == fluctuating_indices).all()
+
+                    ce_loss_selected = F.nll_loss(log_prob[selected_indices], train_labels[selected_indices])
+                    if len(fluctuating_indices) > 0:
+                        ce_loss_fluctuating = F.nll_loss(log_prob[fluctuating_indices], train_labels[fluctuating_indices])
+                    else:
+                        ce_loss_fluctuating = 0
+
+                    if apply_sft['loss']:
+                        loss_cfg = sft_cfg['loss_cfg']
+                        confidence_threshold = loss_cfg['threshold']
+                        weight = loss_cfg['weight']
+
+                        prob = torch.exp(log_prob)
+                        if epoch < memory_bank.warmup:
+                            ce_loss = ce_loss_selected + ce_loss_fluctuating
+
+                            top2prob, top2indices = torch.topk(prob, k=2, dim=-1)
+                            pseudo_label = top2indices[:, 1]
+                            alpha = confidence_threshold - top2prob[:, 1] / top2prob[:, 0]
+                            alpha[alpha < 0] = 0
+                            confidence_penalty = torch.mean(F.cross_entropy(prob, pseudo_label) * alpha)
+                            confidence_penalty = confidence_penalty * weight[0]
+                        else:
+                            ce_loss = ce_loss_selected
+
+                            label_prob = prob[train_labels]
+                            pseudo_prob = confidence_threshold - prob / label_prob
+                            pseudo_prob[pseudo_prob < 0] = 0
+                            confidence_penalty = -torch.sum(log_prob * pseudo_prob) / num_node_types
+                            confidence_penalty = confidence_penalty * weight[1]
+
+                        train_loss = ce_loss + confidence_penalty
+                        # print(ce_loss.item(), confidence_penalty.item())
+
+                        if apply_sft['fixmatch']:
+                            fixmatch_loss = 0
+                            train_loss = train_loss + fixmatch_loss
+                    else:
+                        train_loss = ce_loss_selected
                 else:
                     train_loss = F.nll_loss(log_prob, train_labels)
 
@@ -354,7 +390,7 @@ if __name__ == '__main__':
             msg = f'Epoch {epoch:03d} | Time {epoch_time:.4f}' + \
                   f' | Train_Loss {train_loss:.4f} | Train_Accuracy {train_acc:.4f}' + \
                   f' | Val_Loss {val_loss:.4f} | Val_Accuracy {val_acc:.4f}'
-            if SFT:
+            if apply_sft['filtering']:
                 msg += f' | Fluctuate_Ratio {fluctuate_ratio:.3f}'
             logger.info(msg)
             record = dict(
@@ -439,20 +475,33 @@ if __name__ == '__main__':
         logger.info(msg)
         mean = np.mean(result)
         std = np.std(result)
-        msg = f'{display[term] + display_postfix} Summary: {mean:.4f} ~ {std:.4f}'
+        msg = f'{display[term] + display_postfix} Summary: {mean:.6f} ~ {std:.6f}'
         logger.info(msg)
-        return
+        summary = {term: f'{mean:.4f} ~ {std:.4f}'}
+        return summary
 
 
+    summary_dict = {}
     for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc']:
-        display_result(exp_results[term], term, logger_result)
+        summary = display_result(exp_results[term], term, logger_result)
+        summary_dict.update(summary)
     logger_result.info('__________Results__________')
     train_ratio_list = exp_cfg['evaluate_cfg']['svm_cfg']['train_ratio_list']
     for term in ['macro_f1', 'micro_f1']:
         results = np.array(exp_results[term])
         msg = []
         for index, train_ratio in enumerate(train_ratio_list):
-            display_result(results[:, index], term, logger_result, display_postfix=f'({train_ratio:.1f})')
+            summary = display_result(results[:, index], term, logger_result, display_postfix=f'({train_ratio:.1f})')
+            summary_dict.update(summary)
 
     for term in ['test_acc', 'time_elapsed']:
-        display_result(exp_results[term], term, logger_result)
+        summary = display_result(exp_results[term], term, logger_result)
+        summary_dict.update(summary)
+
+    summary_msg = ['', tag]
+    for term in ['macro_f1', 'micro_f1', 'test_acc']:
+        summary_msg.append(summary_dict[term])
+    summary_msg.append('')
+
+    summary_msg = ' | '.join(summary_msg)
+    logger_result.info(summary_msg)

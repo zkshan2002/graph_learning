@@ -56,7 +56,7 @@
 |   0-2   |   M-A    | 12828 |
 
 - Metapath
-  - connects node type 0(A) only
+  - only metapaths that connect control type nodes(0-1-0, 0-2-0) are selected
 
 |  Type ID  | Semantic | Total |  Mean   | Max | Min |
 |:---------:|:--------:|------:|:-------:|----:|----:|
@@ -65,7 +65,7 @@
 
 - Labels
   - on node type 0(A) only
-  - labeled according to the conferences the authors submitted(?)
+  - labeled according to ?
 
 | Class ID |       Semantic        | Total |
 |:--------:|:---------------------:|------:|
