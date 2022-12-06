@@ -1,3 +1,4 @@
+import copy
 import os
 import os.path as osp
 import json
@@ -8,10 +9,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from utils.training import parse_args, set_seed, get_logger
+from utils.training import parse_args, override_cfg, set_seed, get_logger, build_model
 from utils.training import EarlyStopping, IndicesSampler, Namespace
-from utils.evaluate import svm_test
 from utils.data import to_torch, to_np, load_data, sample_metapath
+from utils.evaluate import svm_test
 from utils.noisy_labels import apply_label_noise, MemoryBank
 
 from config import exp_cfg, train_cfg, model_cfg, data_cfg
@@ -20,35 +21,7 @@ if __name__ == '__main__':
 
     # override cfg with args
     args = parse_args()
-    if hasattr(args, 'tag') and args.tag is not None:
-        exp_cfg['tag'] = args.tag
-    if hasattr(args, 'description') and args.description is not None:
-        exp_cfg['description'] = args.description
-    if hasattr(args, 'seed_list') and args.seed_list is not None:
-        exp_cfg['seed_list'] = args.seed_list
-    if hasattr(args, 'batch_size') and args.batch_size is not None:
-        train_cfg['batch_size'] = args.batch_size
-    if hasattr(args, 'sample_limit') and args.sample_limit is not None:
-        train_cfg['sample_limit'] = args.sample_limit
-    if hasattr(args, 'noise_p') and args.noise_p is not None:
-        data_cfg['noise_cfg']['pair_flip_rate'] = args.noise_p
-        data_cfg['noise_cfg']['apply'] = True
-    if hasattr(args, 'noise_u') and args.noise_u is not None:
-        data_cfg['noise_cfg']['uniform_flip_rate'] = args.noise_u
-        data_cfg['noise_cfg']['apply'] = True
-
-    if hasattr(args, 'sft_filtering_memory') and args.sft_filtering_memory is not None:
-        train_cfg['sft_cfg']['filtering_cfg']['memory'] = args.sft_filtering_memory
-        train_cfg['sft_cfg']['apply_filtering'] = True
-    if hasattr(args, 'sft_filtering_warmup') and args.sft_filtering_warmup is not None:
-        train_cfg['sft_cfg']['filtering_cfg']['warmup'] = args.sft_filtering_warmup
-        train_cfg['sft_cfg']['apply_filtering'] = True
-    if hasattr(args, 'sft_loss_threshold') and args.sft_loss_threshold is not None:
-        train_cfg['sft_cfg']['loss_cfg']['threshold'] = args.sft_loss_threshold
-        train_cfg['sft_cfg']['apply_loss'] = True
-    if hasattr(args, 'sft_loss_weights') and args.sft_loss_weights is not None:
-        train_cfg['sft_cfg']['loss_cfg']['weight'] = args.sft_loss_weights
-        train_cfg['sft_cfg']['apply_loss'] = True
+    override_cfg(args, exp_cfg, train_cfg, model_cfg, data_cfg)
 
     tag = exp_cfg['tag']
     debug = (tag == 'debug')
@@ -74,6 +47,7 @@ if __name__ == '__main__':
         pdb.set_trace()
     else:
         os.makedirs(workdir, exist_ok=debug)
+
     cfg_file = osp.join(workdir, 'cfg.json')
 
     log_file = osp.join(workdir, 'avg_result.log')
@@ -170,10 +144,10 @@ if __name__ == '__main__':
     # apply label noise
     LNL = data_cfg['noise_cfg'].pop('apply')
     if LNL:
-        noisy_labels, label_corruption_mask = apply_label_noise(labels=labels, **data_cfg['noise_cfg'])
+        noisy_labels, label_corruption_mask = apply_label_noise(dataset=dataset, labels=labels, **data_cfg['noise_cfg'])
         noisy_labels = to_torch(noisy_labels, device, indices=True)
 
-        corruption_ratio = np.mean(label_corruption_mask[train_indices].astype(np.int32))
+        corruption_ratio = np.sum(label_corruption_mask[train_indices]) / num_train
         data_cfg['noise_cfg']['corruption_ratio'] = corruption_ratio
     else:
         data_cfg.pop('noise_cfg')
@@ -192,10 +166,24 @@ if __name__ == '__main__':
             apply_sft[key] = False
             sft_cfg.pop(f'{key}_cfg')
     if apply_sft['apply']:
-        assert LNL
+        # assert LNL
         train_cfg['sft_cfg'] = sft_cfg
     if apply_sft['loss'] or apply_sft['fixmatch']:
         assert apply_sft['filtering']
+
+    # [MLC]
+    mlc_cfg = train_cfg.pop('mlc_cfg')
+    apply_mlc = mlc_cfg['apply']
+    if apply_mlc:
+        assert LNL
+        train_cfg['mlc_cfg'] = mlc_cfg
+
+    model_type = model_cfg.pop('type')
+    assert model_type == 'HAN'
+    model_cfg = dict(
+        type=model_type,
+        cfg=model_cfg[f'{model_type}_cfg']
+    )
 
     all_cfg = dict(
         exp=exp_cfg,
@@ -205,10 +193,6 @@ if __name__ == '__main__':
     )
     with open(cfg_file, 'w') as f:
         json.dump(all_cfg, f)
-
-    model_type = model_cfg.pop('type')
-    assert model_type == 'HAN'
-    # assert model_type == 'MLP'
 
     exp_results = {}
     for key in [
@@ -228,6 +212,17 @@ if __name__ == '__main__':
         time_elapsed='Time_Elapsed',
     )
 
+    # build model
+    model = build_model(
+        model_type, model_cfg,
+        node_feature_dim_list, num_metapaths, num_node_types,
+        device,
+    )
+    if apply_mlc:
+        meta_model = copy.deepcopy(model)
+    else:
+        meta_model = None
+
     seed_list = exp_cfg['seed_list']
     num_repeat = len(seed_list)
     for run_id, seed in enumerate(seed_list):
@@ -239,26 +234,17 @@ if __name__ == '__main__':
         logger = get_logger(f'{run_id}_{num_repeat}_seed{seed}', log_file)
         ckpt_file = osp.join(workdir, f'ckpt_seed{seed}.pt')
 
-        # build model
-        from model.HAN import HAN
-
-        model = HAN(
-            node_raw_feature_dim_list=node_feature_dim_list,
-            num_metapaths=num_metapaths,
-            num_cls=num_node_types,
-            device=device,
-            **model_cfg
-        )
-        # from model.MLP import MLP
-        #
-        # model = MLP(
-        #     node_raw_feature_dim_list=node_feature_dim_list,
-        #     num_cls=num_node_types,
-        #     device=device,
-        #     **model_cfg
-        # )
+        model.init_weights()
         optimizer = torch.optim.Adam(model.parameters(), **args.optim_cfg)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, **args.scheduler_cfg)
+
+        if apply_mlc:
+            noise_transition_matrix = torch.eye(num_node_types, device=device)
+            noise_transition_matrix = torch.autograd.Variable(noise_transition_matrix, requires_grad=True)
+            val_sampler_meta = IndicesSampler(val_indices, args.batch_size, shuffle=True, loop=True)
+        else:
+            noise_transition_matrix = None
+            val_sampler_meta = None
 
         # training utils
         early_stopping = EarlyStopping(
@@ -295,6 +281,83 @@ if __name__ == '__main__':
                     train_labels = noisy_labels[indices]
                 else:
                     train_labels = labels[indices]
+
+                if apply_mlc:
+                    meta_model.load_state_dict(model.state_dict())
+
+                    for node_feature in node_feature_list:
+                        if isinstance(node_feature, torch.Tensor):
+                            node_feature = torch.autograd.Variable(node_feature, requires_grad=False)
+                    virtual_labels = torch.autograd.Variable(train_labels, requires_grad=False)
+
+                    logits_virtual, _ = meta_model(
+                        indices, metapath_sampled_list, node_type_mapping, node_feature_list
+                    )
+                    log_prob_virtual = F.log_softmax(logits_virtual, 1)
+                    log_prob_virtual = torch.matmul(log_prob_virtual, noise_transition_matrix)
+                    loss_virtual = F.nll_loss(log_prob_virtual, virtual_labels)
+
+                    meta_model.zero_grad()
+                    grads = torch.autograd.grad(loss_virtual, meta_model.parameters(), create_graph=True)
+
+                    def set_param(module, name_list, value):
+                        next_module = getattr(module, name_list[0])
+                        if isinstance(next_module, torch.nn.Parameter):
+                            assert len(name_list) == 1
+                            # next_module.data = value
+                            setattr(next_module, 'data', value)
+                        else:
+                            assert len(name_list) > 1
+                            set_param(next_module, name_list[1:], value)
+
+                    def db(tensor):
+                        print(torch.autograd.grad(torch.sum(tensor), noise_transition_matrix))
+
+                    for index, (name, param) in enumerate(meta_model.named_parameters()):
+                        # grad = torch.autograd.Variable(grads[index].detach().data)
+                        # new_value = param - grad * 1e-3
+                        new_value = param - grads[index] * 1e-3
+                        name_list = name.split('.')
+                        set_param(meta_model, name_list, new_value)
+                        db(new_value)
+                        db(meta_model.node_feature_projector_list[0].weight)
+                        import pdb
+                        pdb.set_trace()
+
+                    # for index, (name, param) in enumerate(meta_model.named_parameters()):
+                    #     print(f'{index} {name} {param.mean()}')
+
+                    meta_indices = val_sampler_meta()
+                    metapath_sampled_list = sample_metapath(
+                        meta_indices, metapath_list, args.sample_limit, keep_intermediate=False
+                    )
+                    meta_indices = to_torch(meta_indices, device, indices=True)
+                    metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
+
+                    logits_meta, _ = meta_model(
+                        meta_indices, metapath_sampled_list, node_type_mapping, node_feature_list
+                    )
+
+                    import pdb
+                    pdb.set_trace()
+                    debug(logits_meta)
+
+                    log_prob_meta = F.log_softmax(logits_meta, 1)
+                    loss_meta = F.nll_loss(log_prob_meta, labels[meta_indices])
+
+                    import pdb
+                    pdb.set_trace()
+
+                    grad = torch.autograd.grad(loss_meta, noise_transition_matrix, only_inputs=True)[0]
+
+                    import pdb
+                    pdb.set_trace()
+
+                    noise_transition_matrix = noise_transition_matrix - 0.11 * grad
+                    noise_transition_matrix = torch.clamp(noise_transition_matrix, min=0)
+                    noise_transition_matrix = noise_transition_matrix / torch.sum(noise_transition_matrix, dim=0)
+
+                    log_prob = torch.matmul(log_prob, noise_transition_matrix)
 
                 accurate_mask = (torch.argmax(log_prob, dim=-1) == train_labels)
 

@@ -1,26 +1,10 @@
-import os.path as osp
 import argparse
 import logging
 
 import numpy as np
 import torch
 
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, normalized_mutual_info_score, adjusted_rand_score
-from sklearn.cluster import KMeans
-from sklearn.svm import LinearSVC
-
 from typing import Tuple, Dict
-
-
-class Namespace:
-    def __init__(self, **kwargs):
-        self.update(**kwargs)
-        return
-
-    def update(self, **kwargs):
-        self.__dict__.update(kwargs)
-        return
 
 
 def parse_args():
@@ -28,16 +12,69 @@ def parse_args():
     ap.add_argument('--tag', type=str)
     ap.add_argument('--description', type=str)
     ap.add_argument('--seed_list', nargs='+', type=int)
+    ap.add_argument('--dataset', type=str)
     ap.add_argument('--batch_size', type=int)
     ap.add_argument('--sample_limit', type=int)
+
     ap.add_argument('--noise_p', type=float)
     ap.add_argument('--noise_u', type=float)
+
     ap.add_argument('--sft_filtering_memory', type=int)
     ap.add_argument('--sft_filtering_warmup', type=int)
     ap.add_argument('--sft_loss_threshold', type=float)
     ap.add_argument('--sft_loss_weights', nargs='+', type=float)
     args = ap.parse_args()
     return args
+
+
+def override_cfg(args: argparse.Namespace, exp_cfg: dict, train_cfg: dict, model_cfg: dict, data_cfg: dict):
+    # override with args
+    if hasattr(args, 'tag') and args.tag is not None:
+        exp_cfg['tag'] = args.tag
+    if hasattr(args, 'description') and args.description is not None:
+        exp_cfg['description'] = args.description
+    if hasattr(args, 'seed_list') and args.seed_list is not None:
+        exp_cfg['seed_list'] = args.seed_list
+    if hasattr(args, 'dataset') and args.dataset is not None:
+        data_cfg['dataset'] = args.dataset
+    if hasattr(args, 'batch_size') and args.batch_size is not None:
+        train_cfg['batch_size'] = args.batch_size
+    if hasattr(args, 'sample_limit') and args.sample_limit is not None:
+        train_cfg['sample_limit'] = args.sample_limit
+
+    if hasattr(args, 'noise_p') and args.noise_p is not None:
+        data_cfg['noise_cfg']['pair_flip_rate'] = args.noise_p
+        data_cfg['noise_cfg']['apply'] = True
+    if hasattr(args, 'noise_u') and args.noise_u is not None:
+        data_cfg['noise_cfg']['uniform_flip_rate'] = args.noise_u
+        data_cfg['noise_cfg']['apply'] = True
+
+    if hasattr(args, 'sft_filtering_memory') and args.sft_filtering_memory is not None:
+        train_cfg['sft_cfg']['filtering_cfg']['memory'] = args.sft_filtering_memory
+        train_cfg['sft_cfg']['apply_filtering'] = True
+    if hasattr(args, 'sft_filtering_warmup') and args.sft_filtering_warmup is not None:
+        train_cfg['sft_cfg']['filtering_cfg']['warmup'] = args.sft_filtering_warmup
+        train_cfg['sft_cfg']['apply_filtering'] = True
+    if hasattr(args, 'sft_loss_threshold') and args.sft_loss_threshold is not None:
+        train_cfg['sft_cfg']['loss_cfg']['threshold'] = args.sft_loss_threshold
+        train_cfg['sft_cfg']['apply_loss'] = True
+    if hasattr(args, 'sft_loss_weights') and args.sft_loss_weights is not None:
+        train_cfg['sft_cfg']['loss_cfg']['weight'] = args.sft_loss_weights
+        train_cfg['sft_cfg']['apply_loss'] = True
+
+    # override dataset-specific cfg
+    if data_cfg['dataset'] == 'DBLP':
+        train_cfg['batch_size'] = 64
+        train_cfg['sample_limit'] = 512
+        train_cfg['optim_cfg']['lr'] = 5e-3
+    elif data_cfg['dataset'] == 'IMDB':
+        train_cfg['batch_size'] = 4
+        train_cfg['sample_limit'] = 128
+        train_cfg['optim_cfg']['lr'] = 2e-4
+    else:
+        assert False
+
+    return
 
 
 def set_seed(seed):
@@ -68,54 +105,42 @@ def get_logger(name, file):
     return logger
 
 
-def evaluate_results_nc(embeddings, labels, num_classes):
-    def svm_test(X, y, test_sizes=(0.2, 0.4, 0.6, 0.8), repeat=10):
-        random_states = [182318 + i for i in range(repeat)]
-        result_macro_f1_list = []
-        result_micro_f1_list = []
-        for test_size in test_sizes:
-            macro_f1_list = []
-            micro_f1_list = []
-            for i in range(repeat):
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=test_size, shuffle=True, random_state=random_states[i])
-                svm = LinearSVC(dual=False)
-                svm.fit(X_train, y_train)
-                y_pred = svm.predict(X_test)
-                macro_f1 = f1_score(y_test, y_pred, average='macro')
-                micro_f1 = f1_score(y_test, y_pred, average='micro')
-                macro_f1_list.append(macro_f1)
-                micro_f1_list.append(micro_f1)
-            result_macro_f1_list.append((np.mean(macro_f1_list), np.std(macro_f1_list)))
-            result_micro_f1_list.append((np.mean(micro_f1_list), np.std(micro_f1_list)))
-        return result_macro_f1_list, result_micro_f1_list
+def build_model(
+        model_type, model_cfg: dict,
+        node_feature_dim_list, num_metapaths, num_node_types,
+        device
+):
+    if model_type == 'HAN':
+        from models.HAN import HAN
 
-    def kmeans_test(X, y, n_clusters, repeat=10):
-        nmi_list = []
-        ari_list = []
-        for _ in range(repeat):
-            kmeans = KMeans(n_clusters=n_clusters)
-            y_pred = kmeans.fit_predict(X)
-            nmi_score = normalized_mutual_info_score(y, y_pred, average_method='arithmetic')
-            ari_score = adjusted_rand_score(y, y_pred)
-            nmi_list.append(nmi_score)
-            ari_list.append(ari_score)
-        return np.mean(nmi_list), np.std(nmi_list), np.mean(ari_list), np.std(ari_list)
+        model = HAN(
+            node_feature_dim_list=node_feature_dim_list,
+            num_metapaths=num_metapaths,
+            num_cls=num_node_types,
+            device=device,
+            **model_cfg['cfg']
+        )
+    elif model_type == 'MLP':
+        from models.MLP import MLP
 
-    print('SVM test')
-    svm_macro_f1_list, svm_micro_f1_list = svm_test(embeddings, labels)
-    print('Macro-F1: ' + ', '.join(['{:.6f}~{:.6f} ({:.1f})'.format(macro_f1_mean, macro_f1_std, train_size) for
-                                    (macro_f1_mean, macro_f1_std), train_size in
-                                    zip(svm_macro_f1_list, [0.8, 0.6, 0.4, 0.2])]))
-    print('Micro-F1: ' + ', '.join(['{:.6f}~{:.6f} ({:.1f})'.format(micro_f1_mean, micro_f1_std, train_size) for
-                                    (micro_f1_mean, micro_f1_std), train_size in
-                                    zip(svm_micro_f1_list, [0.8, 0.6, 0.4, 0.2])]))
-    print('K-means test')
-    nmi_mean, nmi_std, ari_mean, ari_std = kmeans_test(embeddings, labels, num_classes)
-    print('NMI: {:.6f}~{:.6f}'.format(nmi_mean, nmi_std))
-    print('ARI: {:.6f}~{:.6f}'.format(ari_mean, ari_std))
+        model = MLP(
+            node_raw_feature_dim_list=node_feature_dim_list,
+            num_cls=num_node_types,
+            device=device,
+            **model_cfg
+        )
+    else:
+        assert False
+    return model
 
-    return svm_macro_f1_list, svm_micro_f1_list, nmi_mean, nmi_std, ari_mean, ari_std
+class Namespace:
+    def __init__(self, **kwargs):
+        self.update(**kwargs)
+        return
+
+    def update(self, **kwargs):
+        self.__dict__.update(kwargs)
+        return
 
 
 class EarlyStopping:

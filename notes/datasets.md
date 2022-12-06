@@ -2,12 +2,12 @@
 
 - Node
 
-| Type ID | Semantic  | Count | Feature Dim |            Feature Source            |
-|:-------:|:---------:|------:|------------:|:------------------------------------:|
-|    0    | author(A) |  4057 |         334 | a bag of words rep of paper keywords |
-|    1    | paper(P)  | 14328 |        4231 |      lemma tokenizer transform       |
-|    2    |  term(T)  |  7723 |          50 |                glove                 |
-|    3    |  conf(C)  |    20 |          20 |                  id                  |
+| Type ID | Semantic  | Count | Feature Dim |           Feature Source           |
+|:-------:|:---------:|------:|------------:|:----------------------------------:|
+|    0    | author(A) |  4057 |         334 | bag of words rep of paper keywords |
+|    1    | paper(P)  | 14328 |        4231 |     lemma tokenizer transform      |
+|    2    |  term(T)  |  7723 |          50 |               glove                |
+|    3    |  conf(C)  |    20 |          20 |                 id                 |
 
 - Edge
 
@@ -42,11 +42,11 @@
 
 - Node
 
-| Type ID |  Semantic   | Count | Feature Dim | Feature Source |
-|:-------:|:-----------:|------:|------------:|:--------------:|
-|    0    |  movie(M)   |  4278 |        3066 |                |
-|    1    | director(D) |  2081 |        3066 |                |
-|    2    |  actor(A)   |  5257 |        3066 |                |
+| Type ID |  Semantic   | Count | Feature Dim |          Feature Source           |
+|:-------:|:-----------:|------:|------------:|:---------------------------------:|
+|    0    |  movie(M)   |  4278 |        3066 | bag of words rep of plot keywords |
+|    1    | director(D) |  2081 |        3066 |     bag of words rep of name      |
+|    2    |  actor(A)   |  5257 |        3066 |     bag of words rep of name      |
 
 - Edge
 
@@ -65,7 +65,7 @@
 
 - Labels
   - on node type 0(A) only
-  - labeled according to ?
+  - labeled according to genre information
 
 | Class ID |       Semantic        | Total |
 |:--------:|:---------------------:|------:|

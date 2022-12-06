@@ -29,7 +29,16 @@ def to_np(data):
     return data
 
 
-def load_DBLP(project_root):
+def load_data(dataset: str, project_root):
+    if dataset == 'DBLP':
+        return _load_DBLP(project_root)
+    elif dataset == 'IMDB':
+        return _load_IMDB(project_root)
+    else:
+        assert False
+
+
+def _load_DBLP(project_root):
     data_root = osp.join(project_root, 'data/preprocessed/DBLP_processed')
 
     # load metapaths
@@ -62,6 +71,58 @@ def load_DBLP(project_root):
     adjacency_matrix = scipy.sparse.load_npz(osp.join(data_root, 'adjM.npz'))
 
     # (4057,) author labels, {0, 1, 2, 3}
+    labels = np.load(osp.join(data_root, 'labels.npy'))
+    # train/val/test: 400, 400, 3257
+    all_indices = np.load(osp.join(data_root, 'train_val_test_idx.npz'))
+    train_indices = np.sort(all_indices['train_idx'])
+    val_indices = np.sort(all_indices['val_idx'])
+    test_indices = np.sort(all_indices['test_idx'])
+
+    return (
+        metapath_list,
+        node_feature_list,
+        node_type_mapping,
+        adjacency_matrix,
+        labels,
+        (train_indices, val_indices, test_indices)
+    )
+
+
+def _load_IMDB(project_root):
+    data_root = osp.join(project_root, 'data/preprocessed/IMDB_processed')
+
+    num_control_nodes = 4278
+    # load metapaths(control type only)
+    # ['1/1-0-1', '1/1-0-2-0-1', '2/2-0-2', '2/2-0-1-0-2']
+    metapath_list = []
+    for tag in ['0/0-1-0', '0/0-2-0']:
+        npy_file = osp.join(data_root, f'{tag}_idx.npy')
+        all_metapaths = np.load(npy_file)
+        metapaths = []
+        for control_node in range(num_control_nodes):
+            mask = np.where(all_metapaths[:, -1] == control_node)
+            metapaths.append(all_metapaths[mask])
+        # list of arrays (b, len_path)
+        metapath_list.append(metapaths)
+
+    # load node features
+    # (4278, 3066) (sparse) movie
+    node_features_0 = scipy.sparse.load_npz(osp.join(data_root, 'features_0.npz')).toarray()
+    # (2081, 3066) (sparse) director
+    node_features_1 = scipy.sparse.load_npz(osp.join(data_root, 'features_1.npz')).toarray()
+    # (5257, 3066) (sparse) actor
+    node_features_2 = scipy.sparse.load_npz(osp.join(data_root, 'features_2.npz')).toarray()
+    node_feature_list = [
+        node_features_0, node_features_1, node_features_2
+    ]
+
+    # load structures
+    # (11616,) node type mapping
+    node_type_mapping = np.load(osp.join(data_root, 'node_types.npy'))
+    # (11616, 11616) (sparse) full adjacency matrix
+    adjacency_matrix = scipy.sparse.load_npz(osp.join(data_root, 'adjM.npz'))
+
+    # (4278,) author labels, {0, 1, 2}
     labels = np.load(osp.join(data_root, 'labels.npy'))
     # train/val/test: 400, 400, 3257
     all_indices = np.load(osp.join(data_root, 'train_val_test_idx.npz'))
@@ -129,8 +190,8 @@ def indices_mapping(local2global: torch.tensor):
     return global2local
 
 
-def get_DBLP_statistics(project_dir):
-    _, _, node_type_mapping, AM, _, _ = load_DBLP(project_dir)
+def __get_DBLP_statistics(project_dir):
+    _, _, node_type_mapping, AM, _, _ = _load_DBLP(project_dir)
     A_cnt = np.where(node_type_mapping == 0)[0].shape[0]
     P_cnt = np.where(node_type_mapping == 1)[0].shape[0]
     T_cnt = np.where(node_type_mapping == 2)[0].shape[0]
@@ -149,63 +210,3 @@ def get_DBLP_statistics(project_dir):
     pdb.set_trace()
 
     return
-
-
-def load_data(dataset: str, project_root):
-    assert dataset in ['DBLP', 'IMDB']
-    if dataset == 'DBLP':
-        return load_DBLP(project_root)
-    elif dataset == 'IMDB':
-        return load_IMDB(project_root)
-
-
-def load_IMDB(project_root):
-    data_root = osp.join(project_root, 'data/preprocessed/IMDB_processed')
-
-    num_control_nodes = 4278
-    # load metapaths(control type only)
-    # ['1/1-0-1', '1/1-0-2-0-1', '2/2-0-2', '2/2-0-1-0-2']
-    metapath_list = []
-    for tag in ['0/0-1-0', '0/0-2-0']:
-        npy_file = osp.join(data_root, f'{tag}_idx.npy')
-        all_metapaths = np.load(npy_file)
-        metapaths = []
-        for control_node in range(num_control_nodes):
-            mask = np.where(all_metapaths[:, -1] == control_node)
-            metapaths.append(all_metapaths[mask])
-        # list of arrays (b, len_path)
-        metapath_list.append(metapaths)
-
-    # load node features
-    # (4278, 3066) (sparse) movie
-    node_features_0 = scipy.sparse.load_npz(osp.join(data_root, 'features_0.npz')).toarray()
-    # (2081, 3066) (sparse) director
-    node_features_1 = scipy.sparse.load_npz(osp.join(data_root, 'features_1.npz')).toarray()
-    # (5257, 3066) (sparse) actor
-    node_features_2 = scipy.sparse.load_npz(osp.join(data_root, 'features_2.npz')).toarray()
-    node_feature_list = [
-        node_features_0, node_features_1, node_features_2
-    ]
-
-    # load structures
-    # (11616,) node type mapping
-    node_type_mapping = np.load(osp.join(data_root, 'node_types.npy'))
-    # (11616, 11616) (sparse) full adjacency matrix
-    adjacency_matrix = scipy.sparse.load_npz(osp.join(data_root, 'adjM.npz'))
-
-    # (4278,) author labels, {0, 1, 2}
-    labels = np.load(osp.join(data_root, 'labels.npy'))
-    # train/val/test: 400, 400, 3257
-    all_indices = np.load(osp.join(data_root, 'train_val_test_idx.npz'))
-    train_indices = np.sort(all_indices['train_idx'])
-    val_indices = np.sort(all_indices['val_idx'])
-    test_indices = np.sort(all_indices['test_idx'])
-
-    return (
-        metapath_list,
-        node_feature_list,
-        node_type_mapping,
-        adjacency_matrix,
-        labels,
-        (train_indices, val_indices, test_indices)
-    )

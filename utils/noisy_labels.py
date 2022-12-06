@@ -2,17 +2,21 @@ import numpy as np
 import torch
 
 
-def apply_label_noise(labels: np.ndarray, pair_flip_rate, uniform_flip_rate, seed):
+def apply_label_noise(dataset: str, labels: np.ndarray, pair_flip_rate, uniform_flip_rate, seed):
     np.random.seed(seed)
     num_labels = labels.shape[0]
     num_cls = np.max(labels) + 1
     noisy_labels = np.copy(labels)
 
     # apply pair noise
-    # DBLP: 0: Database; 1: Data Mining; 2: AI; 3: Information Retrieval;
-    # pairs = np.array([1, 0, 3, 2], dtype=np.int32)
-    # IMDB: 0: Action; 1: Comedy; 2: Drama
-    pairs = np.array([1, 2, 1], dtype=np.int32)
+    if dataset == 'DBLP':
+        # DBLP: 0: Database; 1: Data Mining; 2: AI; 3: Information Retrieval;
+        pairs = np.array([1, 0, 3, 2], dtype=np.int32)
+    elif dataset == 'IMDB':
+        # IMDB: 0: Action; 1: Comedy; 2: Drama
+        pairs = np.array([1, 2, 0], dtype=np.int32)
+    else:
+        assert False
     if pair_flip_rate > 0:
         mask = (np.random.rand(num_labels) < pair_flip_rate)
         noisy_labels[mask] = pairs[noisy_labels[mask]]

@@ -38,7 +38,10 @@ train_cfg = dict(
         ),
         apply_fixmatch=False,
         fixmatch_cfg=dict(),
-    )
+    ),
+    mlc_cfg=dict(
+        apply=False,
+    ),
 )
 
 data_cfg = dict(
@@ -50,26 +53,26 @@ data_cfg = dict(
         split_ratio=[0.1, 0.1, 0.8],
     ),
     noise_cfg=dict(
-        apply=True,
+        apply=False,
         seed=0,
-        pair_flip_rate=0.4,
+        pair_flip_rate=0.0,
         uniform_flip_rate=0.0,
     ),
 )
 
 model_cfg = dict(
     type='HAN',
-    node_feature_dim=64,
-    node_feature_dropout_rate=0.5,
-    num_attention_heads=8,
-    semantic_attention_dim=128,
-    type_aware_semantic=True,
+    HAN_cfg=dict(
+        node_feature_dim=64,
+        node_feature_dropout_rate=0.5,
+        num_attention_heads=8,
+        semantic_attention_dim=128,
+        type_aware_semantic=True,
+    ),
+    MLP_cfg=dict(
+        node_feature_dim=64,
+        node_feature_dropout_rate=0.5,
+        num_attention_heads=8,
+        hidden_dims=[256, 256],
+    )
 )
-
-# model_cfg = dict(
-#     type='MLP',
-#     node_feature_dim=64,
-#     node_feature_dropout_rate=0.5,
-#     num_attention_heads=8,
-#     hidden_dims=[256, 256],
-# )

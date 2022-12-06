@@ -15,9 +15,8 @@
   - assert: control type cnt == label type cnt
 
 ## Todo
+- [MLC]
 - SFT fixmatch to utilize fluctuated
-- MLC
-  - label transition matrix?
 - implement MAGNN
   - rnn
 - multiple control type?

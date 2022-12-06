@@ -11,7 +11,7 @@ from typing import List
 # todo: support multiple control type
 class HAN(nn.Module):
     def __init__(
-            self, node_raw_feature_dim_list: List[int], node_feature_dim, node_feature_dropout_rate,
+            self, node_feature_dim_list: List[int], node_feature_dim, node_feature_dropout_rate,
             num_attention_heads, num_metapaths, semantic_attention_dim, num_cls,
             device, type_aware_semantic=False, leaky_relu_slope=0.01,
     ):
@@ -22,9 +22,9 @@ class HAN(nn.Module):
         self.node_feature_dim = node_feature_dim
 
         node_feature_projector_list = []
-        for node_raw_feature_dim in node_raw_feature_dim_list:
+        for node_raw_feature_dim in node_feature_dim_list:
             node_feature_projector = nn.Linear(node_raw_feature_dim, node_feature_dim)
-            nn.init.xavier_normal_(node_feature_projector.weight, gain=np.sqrt(2))
+            # nn.init.xavier_normal_(node_feature_projector.weight, gain=np.sqrt(2))
             node_feature_projector_list.append(node_feature_projector)
         self.node_feature_projector_list = nn.ModuleList(node_feature_projector_list)
 
@@ -37,8 +37,11 @@ class HAN(nn.Module):
         self.num_metapaths = num_metapaths
         self.num_attention_heads = num_attention_heads
 
-        self.node_attention = nn.Parameter(torch.empty((num_metapaths, 1, num_attention_heads, node_feature_dim * 2)))
-        nn.init.xavier_normal_(self.node_attention.data, gain=np.sqrt(2))
+        node_attention_list = []
+        for _ in range(num_metapaths):
+            node_attention = nn.Parameter(torch.empty((1, num_attention_heads, node_feature_dim * 2), device=device))
+            node_attention_list.append(node_attention)
+        self.node_attention_list = nn.ParameterList(node_attention_list)
         self.activation_func = nn.LeakyReLU(leaky_relu_slope)
 
         # semantic level attention
@@ -46,26 +49,51 @@ class HAN(nn.Module):
         self.type_aware_semantic = type_aware_semantic
         if type_aware_semantic:
             # node type-aware semantic projection
-            num_node_types = len(node_raw_feature_dim_list)
+            num_node_types = len(node_feature_dim_list)
             semantic_projector_list = []
+            semantic_attention_list = []
             for _ in range(num_node_types):
                 semantic_projector = nn.Linear(node_feature_dim * num_attention_heads, semantic_attention_dim)
-                nn.init.xavier_normal_(semantic_projector.weight, gain=np.sqrt(2))
                 semantic_projector_list.append(semantic_projector)
+
+                semantic_attention = nn.Parameter(torch.empty((1, semantic_attention_dim), device=device))
+                semantic_attention_list.append(semantic_attention)
             self.semantic_projector_list = nn.ModuleList(semantic_projector_list)
-            self.semantic_attention = nn.Parameter(torch.empty((num_node_types, 1, semantic_attention_dim)))
-            nn.init.xavier_normal_(self.semantic_attention.data, gain=np.sqrt(2))
+            self.semantic_attention_list = nn.ParameterList(semantic_attention_list)
+
         else:
             self.semantic_projector = nn.Linear(node_feature_dim * num_attention_heads, semantic_attention_dim)
-            nn.init.xavier_normal_(self.semantic_projector.weight, gain=np.sqrt(2))
             self.semantic_attention = nn.Parameter(torch.empty((1, semantic_attention_dim)))
-            nn.init.xavier_normal_(self.semantic_attention.data, gain=np.sqrt(2))
 
         # cls head
         self.cls_head = nn.Linear(node_feature_dim * num_attention_heads, num_cls, bias=True)
-        nn.init.xavier_normal_(self.cls_head.weight, gain=np.sqrt(2))
 
         self.to(device)
+        return
+
+    def init_weights(self):
+
+        # node feature transform
+        for node_feature_projector in self.node_feature_projector_list:
+            nn.init.xavier_normal_(node_feature_projector.weight, gain=np.sqrt(2))
+
+        for node_attention in self.node_attention_list:
+            nn.init.xavier_normal_(node_attention.data, gain=np.sqrt(2))
+
+        # semantic level attention
+        if self.type_aware_semantic:
+            for semantic_projector in self.semantic_projector_list:
+                nn.init.xavier_normal_(semantic_projector.weight, gain=np.sqrt(2))
+
+            for semantic_attention in self.semantic_attention_list:
+                nn.init.xavier_normal_(semantic_attention.data, gain=np.sqrt(2))
+        else:
+            nn.init.xavier_normal_(self.semantic_projector.weight, gain=np.sqrt(2))
+            nn.init.xavier_normal_(self.semantic_attention.data, gain=np.sqrt(2))
+
+        # cls head
+        nn.init.xavier_normal_(self.cls_head.weight, gain=np.sqrt(2))
+
         return
 
     def forward(
@@ -93,7 +121,7 @@ class HAN(nn.Module):
             ], dim=-1)
             # -> (batch, head, 1)
             edge_attention = torch.sum(
-                self.node_attention[metapath_id] * edge_attention.unsqueeze(dim=1), dim=-1, keepdim=True
+                self.node_attention_list[metapath_id] * edge_attention.unsqueeze(dim=1), dim=-1, keepdim=True
             )
             edge_attention = self.activation_func(edge_attention)
             graph = dgl.graph((neighbor_node_indices, current_node_indices))
@@ -108,6 +136,7 @@ class HAN(nn.Module):
 
             graph.update_all(message, dgl.function.sum('src_node_information', 'node_feature'))
             node_feature = graph.ndata['node_feature'][target_nodes]
+            node_feature = self.activation_func(node_feature)
             h_metapath.append(node_feature)
         # (path, batch, head, feat)
         h_metapath = torch.stack(h_metapath)
@@ -128,7 +157,7 @@ class HAN(nn.Module):
                     aux = torch.tanh(aux)
                     # -> (mask, 1)
                     metapath_attention[node_indices] = torch.sum(
-                        self.semantic_attention[node_type] * aux, dim=-1, keepdim=True
+                        self.semantic_attention_list[node_type] * aux, dim=-1, keepdim=True
                     )
             else:
                 # (batch, feat)
