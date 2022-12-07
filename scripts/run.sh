@@ -15,36 +15,14 @@
 #    ap.add_argument('--sft_loss_threshold', type=float)
 #    ap.add_argument('--sft_loss_weights', nargs='+', type=float)
 
-#python3 main.py --tag='exp2 HAN IMDB SFT_1_4' --dataset 'IMDB' \
-#--sft_filtering_memory 1 --sft_filtering_warmup 4
-#
-#python3 main.py --tag='exp2 HAN IMDB p1 SFT_1_4' --dataset 'IMDB' --noise_p 0.1 \
-#--sft_filtering_memory 1 --sft_filtering_warmup 4
-#
-#python3 main.py --tag='exp2 HAN IMDB p2 SFT_1_4' --dataset 'IMDB' --noise_p 0.2 \
-#--sft_filtering_memory 1 --sft_filtering_warmup 4
-#
-#python3 main.py --tag='exp2 HAN IMDB p3 SFT_1_4' --dataset 'IMDB' --noise_p 0.3 \
-#--sft_filtering_memory 1 --sft_filtering_warmup 4
-#
-#python3 main.py --tag='exp2 HAN IMDB p4 SFT_1_4' --dataset 'IMDB' --noise_p 0.4 \
-#--sft_filtering_memory 1 --sft_filtering_warmup 4
-#
-#python3 main.py --tag='exp2 HAN IMDB p5 SFT_1_4' --dataset 'IMDB' --noise_p 0.5 \
-#--sft_filtering_memory 1 --sft_filtering_warmup 4
+python3 main.py --tag='exp1 HAN DBLP p1' --dataset 'DBLP' --noise_p 0.1
+python3 main.py --tag='exp1 HAN DBLP p2' --dataset 'DBLP' --noise_p 0.2
+python3 main.py --tag='exp1 HAN DBLP p3' --dataset 'DBLP' --noise_p 0.3
+python3 main.py --tag='exp1 HAN DBLP p4' --dataset 'DBLP' --noise_p 0.4
+python3 main.py --tag='exp1 HAN DBLP p5' --dataset 'DBLP' --noise_p 0.5
 
-
-python3 main.py --tag='exp2 HAN IMDB u1 SFT_1_4' --dataset 'IMDB' --noise_u 0.1 \
---sft_filtering_memory 1 --sft_filtering_warmup 4
-
-python3 main.py --tag='exp2 HAN IMDB u2 SFT_1_4' --dataset 'IMDB' --noise_u 0.2 \
---sft_filtering_memory 1 --sft_filtering_warmup 4
-
-python3 main.py --tag='exp2 HAN IMDB u3 SFT_1_4' --dataset 'IMDB' --noise_u 0.3 \
---sft_filtering_memory 1 --sft_filtering_warmup 4
-
-python3 main.py --tag='exp2 HAN IMDB u4 SFT_1_4' --dataset 'IMDB' --noise_u 0.4 \
---sft_filtering_memory 1 --sft_filtering_warmup 4
-
-python3 main.py --tag='exp2 HAN IMDB u5 SFT_1_4' --dataset 'IMDB' --noise_u 0.5 \
---sft_filtering_memory 1 --sft_filtering_warmup 4
+python3 main.py --tag='exp1 HAN DBLP u1' --dataset 'DBLP' --noise_u 0.1
+python3 main.py --tag='exp1 HAN DBLP u2' --dataset 'DBLP' --noise_u 0.2
+python3 main.py --tag='exp1 HAN DBLP u3' --dataset 'DBLP' --noise_u 0.3
+python3 main.py --tag='exp1 HAN DBLP u4' --dataset 'DBLP' --noise_u 0.4
+python3 main.py --tag='exp1 HAN DBLP u5' --dataset 'DBLP' --noise_u 0.5
