@@ -1,7 +1,9 @@
 exp_cfg = dict(
     tag='debug',
     description='',
-    seed_list=[100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+    seed_list=[100, 200, 300, 400, 500,
+               # 600, 700, 800, 900, 1000
+               ],
     device_id=0,
     evaluate_cfg=dict(
         svm_cfg=dict(
@@ -41,6 +43,8 @@ train_cfg = dict(
     ),
     mlc_cfg=dict(
         apply=False,
+        virtual_lr=2e-4,
+        T_lr=1e-2,
     ),
 )
 
@@ -57,6 +61,7 @@ data_cfg = dict(
         seed=0,
         pair_flip_rate=0.0,
         uniform_flip_rate=0.0,
+        fix_num=True,
     ),
 )
 

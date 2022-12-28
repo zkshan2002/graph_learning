@@ -6,23 +6,24 @@
 #    ap.add_argument('--dataset', type=str)
 #    ap.add_argument('--batch_size', type=int)
 #    ap.add_argument('--sample_limit', type=int)
-#
+#    # LNL
 #    ap.add_argument('--noise_p', type=float)
 #    ap.add_argument('--noise_u', type=float)
-#
+#    # SFT
 #    ap.add_argument('--sft_filtering_memory', type=int)
 #    ap.add_argument('--sft_filtering_warmup', type=int)
 #    ap.add_argument('--sft_loss_threshold', type=float)
 #    ap.add_argument('--sft_loss_weights', nargs='+', type=float)
+#    # MLC
+#    ap.add_argument('--mlc_virtual_lr', type=float)
+#    ap.add_argument('--mlc_T_lr', type=float)
 
-python3 main.py --tag='exp1 HAN DBLP p1' --dataset 'DBLP' --noise_p 0.1
-python3 main.py --tag='exp1 HAN DBLP p2' --dataset 'DBLP' --noise_p 0.2
-python3 main.py --tag='exp1 HAN DBLP p3' --dataset 'DBLP' --noise_p 0.3
-python3 main.py --tag='exp1 HAN DBLP p4' --dataset 'DBLP' --noise_p 0.4
-python3 main.py --tag='exp1 HAN DBLP p5' --dataset 'DBLP' --noise_p 0.5
+dataset='IMDB'
 
-python3 main.py --tag='exp1 HAN DBLP u1' --dataset 'DBLP' --noise_u 0.1
-python3 main.py --tag='exp1 HAN DBLP u2' --dataset 'DBLP' --noise_u 0.2
-python3 main.py --tag='exp1 HAN DBLP u3' --dataset 'DBLP' --noise_u 0.3
-python3 main.py --tag='exp1 HAN DBLP u4' --dataset 'DBLP' --noise_u 0.4
-python3 main.py --tag='exp1 HAN DBLP u5' --dataset 'DBLP' --noise_u 0.5
+python3 main.py --tag="exp0 $dataset" --dataset $dataset
+
+for (( count=1; count<=5; count++ ))
+do
+  python3 main.py --tag="exp1 $dataset p$count" --dataset $dataset --noise_p "0.$count"
+  python3 main.py --tag="exp1 $dataset u$count" --dataset $dataset --noise_u "0.$count"
+done

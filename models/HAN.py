@@ -4,12 +4,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import dgl
 import dgl.nn.functional as dgl_F
+from models.meta import MetaModule, MetaLinear
 
 from typing import List
 
 
-# todo: support multiple control type
-class HAN(nn.Module):
+class HAN(MetaModule):
     def __init__(
             self, node_feature_dim_list: List[int], node_feature_dim, node_feature_dropout_rate,
             num_attention_heads, num_metapaths, semantic_attention_dim, num_cls,
@@ -23,8 +23,7 @@ class HAN(nn.Module):
 
         node_feature_projector_list = []
         for node_raw_feature_dim in node_feature_dim_list:
-            node_feature_projector = nn.Linear(node_raw_feature_dim, node_feature_dim)
-            # nn.init.xavier_normal_(node_feature_projector.weight, gain=np.sqrt(2))
+            node_feature_projector = MetaLinear(node_raw_feature_dim, node_feature_dim, device=device)
             node_feature_projector_list.append(node_feature_projector)
         self.node_feature_projector_list = nn.ModuleList(node_feature_projector_list)
 
@@ -39,9 +38,9 @@ class HAN(nn.Module):
 
         node_attention_list = []
         for _ in range(num_metapaths):
-            node_attention = nn.Parameter(torch.empty((1, num_attention_heads, node_feature_dim * 2), device=device))
+            node_attention = MetaLinear(node_feature_dim * 2, num_attention_heads, bias=False, device=device)
             node_attention_list.append(node_attention)
-        self.node_attention_list = nn.ParameterList(node_attention_list)
+        self.node_attention_list = nn.ModuleList(node_attention_list)
         self.activation_func = nn.LeakyReLU(leaky_relu_slope)
 
         # semantic level attention
@@ -53,43 +52,40 @@ class HAN(nn.Module):
             semantic_projector_list = []
             semantic_attention_list = []
             for _ in range(num_node_types):
-                semantic_projector = nn.Linear(node_feature_dim * num_attention_heads, semantic_attention_dim)
+                semantic_projector = MetaLinear(node_feature_dim * num_attention_heads, semantic_attention_dim, device=device)
                 semantic_projector_list.append(semantic_projector)
-
-                semantic_attention = nn.Parameter(torch.empty((1, semantic_attention_dim), device=device))
+                semantic_attention = MetaLinear(semantic_attention_dim, 1, bias=False, device=device)
                 semantic_attention_list.append(semantic_attention)
             self.semantic_projector_list = nn.ModuleList(semantic_projector_list)
-            self.semantic_attention_list = nn.ParameterList(semantic_attention_list)
+            self.semantic_attention_list = nn.ModuleList(semantic_attention_list)
 
         else:
             self.semantic_projector = nn.Linear(node_feature_dim * num_attention_heads, semantic_attention_dim)
-            self.semantic_attention = nn.Parameter(torch.empty((1, semantic_attention_dim)))
+            self.semantic_attention = nn.Linear(semantic_attention_dim, 1, bias=False)
 
         # cls head
-        self.cls_head = nn.Linear(node_feature_dim * num_attention_heads, num_cls, bias=True)
+        self.cls_head = MetaLinear(node_feature_dim * num_attention_heads, num_cls, bias=True, device=device)
 
-        self.to(device)
+        # self.to(device)
         return
 
     def init_weights(self):
-
         # node feature transform
         for node_feature_projector in self.node_feature_projector_list:
             nn.init.xavier_normal_(node_feature_projector.weight, gain=np.sqrt(2))
 
         for node_attention in self.node_attention_list:
-            nn.init.xavier_normal_(node_attention.data, gain=np.sqrt(2))
+            nn.init.xavier_normal_(node_attention.weight, gain=np.sqrt(2))
 
         # semantic level attention
         if self.type_aware_semantic:
             for semantic_projector in self.semantic_projector_list:
                 nn.init.xavier_normal_(semantic_projector.weight, gain=np.sqrt(2))
-
             for semantic_attention in self.semantic_attention_list:
-                nn.init.xavier_normal_(semantic_attention.data, gain=np.sqrt(2))
+                nn.init.xavier_normal_(semantic_attention.weight, gain=np.sqrt(2))
         else:
             nn.init.xavier_normal_(self.semantic_projector.weight, gain=np.sqrt(2))
-            nn.init.xavier_normal_(self.semantic_attention.data, gain=np.sqrt(2))
+            nn.init.xavier_normal_(self.semantic_attention.weight, gain=np.sqrt(2))
 
         # cls head
         nn.init.xavier_normal_(self.cls_head.weight, gain=np.sqrt(2))
@@ -120,9 +116,7 @@ class HAN(nn.Module):
                 node_features[current_node_indices], node_features[neighbor_node_indices]
             ], dim=-1)
             # -> (batch, head, 1)
-            edge_attention = torch.sum(
-                self.node_attention_list[metapath_id] * edge_attention.unsqueeze(dim=1), dim=-1, keepdim=True
-            )
+            edge_attention = self.node_attention_list[metapath_id](edge_attention).unsqueeze(dim=-1)
             edge_attention = self.activation_func(edge_attention)
             graph = dgl.graph((neighbor_node_indices, current_node_indices))
             edge_attention = dgl_F.edge_softmax(graph, edge_attention)
@@ -156,9 +150,7 @@ class HAN(nn.Module):
                     )
                     aux = torch.tanh(aux)
                     # -> (mask, 1)
-                    metapath_attention[node_indices] = torch.sum(
-                        self.semantic_attention_list[node_type] * aux, dim=-1, keepdim=True
-                    )
+                    metapath_attention[node_indices] = self.semantic_attention_list[node_type](aux)
             else:
                 # (batch, feat)
                 metapath_attention = self.semantic_projector(
@@ -166,7 +158,7 @@ class HAN(nn.Module):
                 )
                 metapath_attention = torch.tanh(metapath_attention)
                 # -> (batch, 1)
-                metapath_attention = torch.sum(self.semantic_attention * metapath_attention, dim=-1, keepdim=True)
+                metapath_attention = self.semantic_attention(metapath_attention)
             # -> (1, 1)
             metapath_attention = torch.mean(metapath_attention, dim=0, keepdim=True)
             beta.append(metapath_attention)
@@ -181,3 +173,29 @@ class HAN(nn.Module):
         cls_logits = self.cls_head(embeddings)
 
         return cls_logits, embeddings
+
+    def named_params2(self):
+        result = []
+
+        def named_module_list(module_list, prefix):
+            result = []
+            for i, module in enumerate(module_list):
+                result.append((f'{prefix}.{i}', module))
+            return result
+
+        # node feature transform
+        result.extend(named_module_list(self.node_feature_projector_list, 'node_feature_projector'))
+        result.extend(named_module_list(self.node_attention_list, 'node_attention'))
+
+        # semantic level attention
+        if self.type_aware_semantic:
+            result.extend(named_module_list(self.semantic_projector_list, 'semantic_projector'))
+            result.extend(named_module_list(self.semantic_attention_list, 'semantic_attention'))
+        else:
+            nn.init.xavier_normal_(self.semantic_projector.weight, gain=np.sqrt(2))
+            nn.init.xavier_normal_(self.semantic_attention.weight, gain=np.sqrt(2))
+
+        # cls head
+        nn.init.xavier_normal_(self.cls_head.weight, gain=np.sqrt(2))
+
+        return

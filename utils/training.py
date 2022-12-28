@@ -15,14 +15,17 @@ def parse_args():
     ap.add_argument('--dataset', type=str)
     ap.add_argument('--batch_size', type=int)
     ap.add_argument('--sample_limit', type=int)
-
+    # LNL
     ap.add_argument('--noise_p', type=float)
     ap.add_argument('--noise_u', type=float)
-
+    # SFT
     ap.add_argument('--sft_filtering_memory', type=int)
     ap.add_argument('--sft_filtering_warmup', type=int)
     ap.add_argument('--sft_loss_threshold', type=float)
     ap.add_argument('--sft_loss_weights', nargs='+', type=float)
+    # MLC
+    ap.add_argument('--mlc_virtual_lr', type=float)
+    ap.add_argument('--mlc_T_lr', type=float)
     args = ap.parse_args()
     return args
 
@@ -41,14 +44,14 @@ def override_cfg(args: argparse.Namespace, exp_cfg: dict, train_cfg: dict, model
         train_cfg['batch_size'] = args.batch_size
     if hasattr(args, 'sample_limit') and args.sample_limit is not None:
         train_cfg['sample_limit'] = args.sample_limit
-
+    # LNL
     if hasattr(args, 'noise_p') and args.noise_p is not None:
         data_cfg['noise_cfg']['pair_flip_rate'] = args.noise_p
         data_cfg['noise_cfg']['apply'] = True
     if hasattr(args, 'noise_u') and args.noise_u is not None:
         data_cfg['noise_cfg']['uniform_flip_rate'] = args.noise_u
         data_cfg['noise_cfg']['apply'] = True
-
+    # SFT
     if hasattr(args, 'sft_filtering_memory') and args.sft_filtering_memory is not None:
         train_cfg['sft_cfg']['filtering_cfg']['memory'] = args.sft_filtering_memory
         train_cfg['sft_cfg']['apply_filtering'] = True
@@ -61,6 +64,13 @@ def override_cfg(args: argparse.Namespace, exp_cfg: dict, train_cfg: dict, model
     if hasattr(args, 'sft_loss_weights') and args.sft_loss_weights is not None:
         train_cfg['sft_cfg']['loss_cfg']['weight'] = args.sft_loss_weights
         train_cfg['sft_cfg']['apply_loss'] = True
+    # MLC
+    if hasattr(args, 'mlc_virtual_lr') and args.mlc_virtual_lr is not None:
+        train_cfg['mlc_cfg']['virtual_lr'] = args.mlc_virtual_lr
+        train_cfg['mlc_cfg']['apply'] = True
+    if hasattr(args, 'mlc_T_lr') and args.mlc_T_lr is not None:
+        train_cfg['mlc_cfg']['T_lr'] = args.mlc_T_lr
+        train_cfg['mlc_cfg']['apply'] = True
 
     # override dataset-specific cfg
     if data_cfg['dataset'] == 'DBLP':

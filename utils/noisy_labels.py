@@ -2,35 +2,60 @@ import numpy as np
 import torch
 
 
-def apply_label_noise(dataset: str, labels: np.ndarray, pair_flip_rate, uniform_flip_rate, seed):
+def apply_label_noise(dataset: str, labels: np.ndarray, pair_flip_rate, uniform_flip_rate, seed, fix_num):
+    assert not (pair_flip_rate > 0 and uniform_flip_rate > 0)
+    if pair_flip_rate > 0:
+        return _apply_pair_noise(dataset, labels, pair_flip_rate, seed, fix_num)
+    if uniform_flip_rate > 0:
+        return _apply_uniform_noise(labels, uniform_flip_rate, seed, fix_num)
+
+
+pairs_dict = {
+    'DBLP': [1, 0, 3, 2],  # 0: Database; 1: Data Mining; 2: AI; 3: Information Retrieval
+    'IMDB': [1, 2, 0],  # 0: Action; 1: Comedy; 2: Drama
+}
+
+
+def _apply_pair_noise(dataset: str, labels: np.ndarray, flip_rate, seed, fix_num):
+    np.random.seed(seed)
+    num_labels = labels.shape[0]
+    noisy_labels = np.copy(labels)
+
+    if flip_rate > 0:
+        pairs = np.array(pairs_dict[dataset], dtype=np.int32)
+        if fix_num:
+            num_flip = int(num_labels * flip_rate)
+            flip_indices = np.random.choice(num_labels, num_flip, replace=False)
+        else:
+            mask = (np.random.rand(num_labels) < flip_rate)
+            flip_indices = np.where(mask)[0]
+        noisy_labels[flip_indices] = pairs[noisy_labels[flip_indices]]
+
+    flip_mask = (noisy_labels != labels)
+
+    return noisy_labels, flip_mask
+
+
+def _apply_uniform_noise(labels: np.ndarray, flip_rate, seed, fix_num):
     np.random.seed(seed)
     num_labels = labels.shape[0]
     num_cls = np.max(labels) + 1
     noisy_labels = np.copy(labels)
 
-    # apply pair noise
-    if dataset == 'DBLP':
-        # DBLP: 0: Database; 1: Data Mining; 2: AI; 3: Information Retrieval;
-        pairs = np.array([1, 0, 3, 2], dtype=np.int32)
-    elif dataset == 'IMDB':
-        # IMDB: 0: Action; 1: Comedy; 2: Drama
-        pairs = np.array([1, 2, 0], dtype=np.int32)
-    else:
-        assert False
-    if pair_flip_rate > 0:
-        mask = (np.random.rand(num_labels) < pair_flip_rate)
-        noisy_labels[mask] = pairs[noisy_labels[mask]]
+    if flip_rate > 0:
+        if fix_num:
+            num_flip = int(num_labels * flip_rate)
+            flip_indices = np.random.choice(num_labels, num_flip, replace=False)
+        else:
+            mask = (np.random.rand(num_labels) < flip_rate)
+            flip_indices = np.where(mask)[0]
+            num_flip = flip_indices.shape[0]
+        shift = np.random.randint(1, num_cls, size=num_flip)
+        noisy_labels[flip_indices] = (labels[flip_indices] + shift) % num_cls
 
-    # apply uniform noise
-    if uniform_flip_rate > 0:
-        mask = (np.random.rand(num_labels) < uniform_flip_rate)
-        num_corrupted = np.where(mask)[0].shape[0]
-        shift = np.random.randint(1, num_cls, size=num_corrupted)
-        noisy_labels[mask] = (labels[mask] + shift) % num_cls
+    flip_mask = (noisy_labels != labels)
 
-    is_corrupted = (noisy_labels != labels)
-
-    return noisy_labels, is_corrupted
+    return noisy_labels, flip_mask
 
 
 class MemoryBank:

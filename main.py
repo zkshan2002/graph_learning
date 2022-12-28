@@ -44,6 +44,7 @@ if __name__ == '__main__':
         print(f'Workdir exists: {workdir}')
         print('Continue?')
         import pdb
+
         pdb.set_trace()
     else:
         os.makedirs(workdir, exist_ok=debug)
@@ -57,7 +58,6 @@ if __name__ == '__main__':
     dataset = data_cfg['dataset']
     metapath_list, node_feature_list, node_type_mapping, adjacency_matrix, labels, (
         train_indices, val_indices, test_indices) = load_data(dataset, project_root)
-
 
     # # 1-0
     # metapaths = []
@@ -219,7 +219,11 @@ if __name__ == '__main__':
         device,
     )
     if apply_mlc:
-        meta_model = copy.deepcopy(model)
+        meta_model = build_model(
+            model_type, model_cfg,
+            node_feature_dim_list, num_metapaths, num_node_types,
+            device,
+        )
     else:
         meta_model = None
 
@@ -235,7 +239,8 @@ if __name__ == '__main__':
         ckpt_file = osp.join(workdir, f'ckpt_seed{seed}.pt')
 
         model.init_weights()
-        optimizer = torch.optim.Adam(model.parameters(), **args.optim_cfg)
+
+        optimizer = torch.optim.Adam(model.params(), **args.optim_cfg)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, **args.scheduler_cfg)
 
         if apply_mlc:
@@ -285,10 +290,7 @@ if __name__ == '__main__':
                 if apply_mlc:
                     meta_model.load_state_dict(model.state_dict())
 
-                    for node_feature in node_feature_list:
-                        if isinstance(node_feature, torch.Tensor):
-                            node_feature = torch.autograd.Variable(node_feature, requires_grad=False)
-                    virtual_labels = torch.autograd.Variable(train_labels, requires_grad=False)
+                    virtual_labels = train_labels
 
                     logits_virtual, _ = meta_model(
                         indices, metapath_sampled_list, node_type_mapping, node_feature_list
@@ -298,31 +300,33 @@ if __name__ == '__main__':
                     loss_virtual = F.nll_loss(log_prob_virtual, virtual_labels)
 
                     meta_model.zero_grad()
-                    grads = torch.autograd.grad(loss_virtual, meta_model.parameters(), create_graph=True)
+                    grads = torch.autograd.grad(loss_virtual, (meta_model.params()), create_graph=True)
+                    meta_model.update_params(grads, mlc_cfg['virtual_lr'])
 
-                    def set_param(module, name_list, value):
-                        next_module = getattr(module, name_list[0])
-                        if isinstance(next_module, torch.nn.Parameter):
-                            assert len(name_list) == 1
-                            # next_module.data = value
-                            setattr(next_module, 'data', value)
-                        else:
-                            assert len(name_list) > 1
-                            set_param(next_module, name_list[1:], value)
+                    # def set_param(module, name_list, value):
+                    #     next_module = getattr(module, name_list[0])
+                    #     import pdb
+                    #     pdb.set_trace()
+                    #     if isinstance(next_module, torch.nn.Parameter):
+                    #         assert len(name_list) == 1
+                    #         # next_module.data = value
+                    #         setattr(next_module, 'data', value)
+                    #     else:
+                    #         assert len(name_list) > 1
+                    #         set_param(next_module, name_list[1:], value)
+                    #     return
 
-                    def db(tensor):
-                        print(torch.autograd.grad(torch.sum(tensor), noise_transition_matrix))
 
-                    for index, (name, param) in enumerate(meta_model.named_parameters()):
+                    # for index, (name, param) in enumerate(meta_model.named_parameters()):
                         # grad = torch.autograd.Variable(grads[index].detach().data)
                         # new_value = param - grad * 1e-3
-                        new_value = param - grads[index] * 1e-3
-                        name_list = name.split('.')
-                        set_param(meta_model, name_list, new_value)
-                        db(new_value)
-                        db(meta_model.node_feature_projector_list[0].weight)
-                        import pdb
-                        pdb.set_trace()
+                        # new_value = param - grads[index] * 1e-3
+                        # name_list = name.split('.')
+                        # set_param(meta_model, name_list, new_value)
+                        # local_grad = torch.autograd.grad(new_value, noise_transition_matrix)
+                        # local_grad_dict[name] = torch
+                        # db(new_value)
+                        # db(meta_model.node_feature_projector_list[0].weight)
 
                     # for index, (name, param) in enumerate(meta_model.named_parameters()):
                     #     print(f'{index} {name} {param.mean()}')
@@ -338,22 +342,12 @@ if __name__ == '__main__':
                         meta_indices, metapath_sampled_list, node_type_mapping, node_feature_list
                     )
 
-                    import pdb
-                    pdb.set_trace()
-                    debug(logits_meta)
-
                     log_prob_meta = F.log_softmax(logits_meta, 1)
                     loss_meta = F.nll_loss(log_prob_meta, labels[meta_indices])
 
-                    import pdb
-                    pdb.set_trace()
-
                     grad = torch.autograd.grad(loss_meta, noise_transition_matrix, only_inputs=True)[0]
 
-                    import pdb
-                    pdb.set_trace()
-
-                    noise_transition_matrix = noise_transition_matrix - 0.11 * grad
+                    noise_transition_matrix = noise_transition_matrix - grad * mlc_cfg['T_lr']
                     noise_transition_matrix = torch.clamp(noise_transition_matrix, min=0)
                     noise_transition_matrix = noise_transition_matrix / torch.sum(noise_transition_matrix, dim=0)
 
@@ -375,7 +369,8 @@ if __name__ == '__main__':
 
                     ce_loss_selected = F.nll_loss(log_prob[selected_indices], train_labels[selected_indices])
                     if len(fluctuating_indices) > 0:
-                        ce_loss_fluctuating = F.nll_loss(log_prob[fluctuating_indices], train_labels[fluctuating_indices])
+                        ce_loss_fluctuating = F.nll_loss(log_prob[fluctuating_indices],
+                                                         train_labels[fluctuating_indices])
                     else:
                         ce_loss_fluctuating = 0
 
