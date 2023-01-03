@@ -1,45 +1,51 @@
 import numpy as np
 
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, confusion_matrix
 from sklearn.svm import LinearSVC
 
 from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
 from sklearn.cluster import KMeans
 
 
-def svm_test(embeddings, labels, seed, train_ratio_list, num_repeat=10):
-    macro_f1_mean = []
-    macro_f1_std = []
-    micro_f1_mean = []
-    micro_f1_std = []
-    random_seeds = np.arange(num_repeat, dtype=np.int32) + seed
-    for train_ratio in train_ratio_list:
-        macro_f1_list = []
-        micro_f1_list = []
-        for i in range(num_repeat):
-            X_train, X_test, y_train, y_test = train_test_split(
-                embeddings, labels, test_size=1 - train_ratio, shuffle=True, random_state=random_seeds[i]
-            )
-            svm = LinearSVC(dual=False)
-            svm.fit(X_train, y_train)
-            y_pred = svm.predict(X_test)
-            macro_f1 = f1_score(y_test, y_pred, average='macro')
-            macro_f1_list.append(macro_f1)
-            micro_f1 = f1_score(y_test, y_pred, average='micro')
-            micro_f1_list.append(micro_f1)
-        macro_f1_mean.append((np.mean(macro_f1_list)))
-        macro_f1_std.append((np.std(macro_f1_list)))
-        micro_f1_mean.append((np.mean(micro_f1_list)))
-        micro_f1_std.append((np.std(micro_f1_list)))
-    macro_f1_msg = 'Macro-F1: ' + ' | '.join([
-        f'{macro_f1_mean[i]:.6f} ~ {macro_f1_std[i]:.6f} ({train_ratio_list[i]:.1f})'
-        for i in range(len(train_ratio_list))
-    ])
-    micro_f1_msg = 'Micro-F1: ' + ' | '.join([
-        f'{micro_f1_mean[i]:.6f} ~ {micro_f1_std[i]:.6f} ({train_ratio_list[i]:.1f})'
-        for i in range(len(train_ratio_list))
-    ])
+def svm_test(embeddings, labels, train_ratio, repeat, seed):
+    macro_f1_list = []
+    micro_f1_list = []
+    confusion_mat_list = []
+
+    for i in range(repeat):
+        X_train, X_test, y_train, y_test = train_test_split(
+            embeddings, labels, train_size=train_ratio, shuffle=True, random_state=seed + i
+        )
+        svm = LinearSVC(dual=False)
+        svm.fit(X_train, y_train)
+        y_pred = svm.predict(X_test)
+        macro_f1_list.append(
+            f1_score(y_test, y_pred, average='macro')
+        )
+        micro_f1_list.append(
+            f1_score(y_test, y_pred, average='micro')
+        )
+        confusion_mat_list.append(
+            confusion_matrix(y_test, y_pred).reshape(-1)
+        )
+
+    macro_f1_mean = np.mean(macro_f1_list)
+    macro_f1_std = np.std(macro_f1_list)
+    macro_f1_msg = f'Macro-F1: {macro_f1_mean:.6f} ~ {macro_f1_std:.6f}'
+    micro_f1_mean = np.mean(micro_f1_list)
+    micro_f1_std = np.std(micro_f1_list)
+    micro_f1_msg = f'Micro-F1: {micro_f1_mean:.6f} ~ {micro_f1_std:.6f}'
+    confusion_mats = np.stack(confusion_mat_list)
+    confusion_mat_mean = np.mean(confusion_mats, axis=0)
+    confusion_mat_std = np.std(confusion_mats, axis=0)
+    num_cls = np.max(labels) + 1
+    confusion_mat_msg = f'Confusion Matrix:\n'
+    for i in range(num_cls * num_cls):
+        confusion_mat_msg += f'{confusion_mat_mean[i]:.2f},'
+        if (i + 1) % num_cls == 0:
+            confusion_mat_msg += '\n'
+
     result_dict = dict(
         macro_f1=dict(
             mean=macro_f1_mean,
@@ -51,6 +57,11 @@ def svm_test(embeddings, labels, seed, train_ratio_list, num_repeat=10):
             std=micro_f1_std,
             msg=micro_f1_msg,
         ),
+        confusion_mat=dict(
+            mean=confusion_mat_mean,
+            std=confusion_mat_std,
+            msg=confusion_mat_msg,
+        )
     )
     return result_dict
 

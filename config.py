@@ -1,27 +1,25 @@
 exp_cfg = dict(
+    command='',
     tag='debug',
     description='',
     seed_list=[100, 200, 300, 400, 500,
                # 600, 700, 800, 900, 1000
                ],
     device_id=0,
+    verbose=False,
     evaluate_cfg=dict(
-        svm_cfg=dict(
-            train_ratio_list=[0.8],
-        )
+        train_ratio=0.8,
+        repeat=10,
     ),
 )
 
 train_cfg = dict(
     epoch=100,
-    patience=10,
-    # 64 for DBLP, 4 for IMDB
-    batch_size=4,
-    # 512 for DBLP, 128 for IMDB
-    sample_limit=128,
+    patience=-1,
+    batch_size=64,
+    sample_limit=-1,
     optim_cfg=dict(
-        # 5e-3 for DBLP, 2e-4 for IMDB
-        lr=2e-4,
+        lr=-1,
         weight_decay=0.001,
     ),
     scheduler_cfg=dict(
@@ -49,8 +47,7 @@ train_cfg = dict(
 )
 
 data_cfg = dict(
-    # 'DBLP', 'IMDB'
-    dataset='IMDB',
+    dataset='',
     split_cfg=dict(
         apply=True,
         seed=0,

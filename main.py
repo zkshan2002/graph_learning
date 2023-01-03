@@ -3,23 +3,21 @@ import os
 import os.path as osp
 import json
 import time
-import logging
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 from utils.training import parse_args, override_cfg, set_seed, get_logger, build_model
-from utils.training import EarlyStopping, IndicesSampler, Namespace
-from utils.data import to_torch, to_np, load_data, sample_metapath
+from utils.training import EarlyStopping, Sampler, Namespace
+from utils.data import to_torch, to_np, load_data
 from utils.evaluate import svm_test
 from utils.noisy_labels import apply_label_noise, MemoryBank
 
-from config import exp_cfg, train_cfg, model_cfg, data_cfg
 
-if __name__ == '__main__':
-
+def main():
     # override cfg with args
+    from config import exp_cfg, train_cfg, model_cfg, data_cfg
     args = parse_args()
     override_cfg(args, exp_cfg, train_cfg, model_cfg, data_cfg)
 
@@ -51,14 +49,15 @@ if __name__ == '__main__':
 
     cfg_file = osp.join(workdir, 'cfg.json')
 
-    log_file = osp.join(workdir, 'avg_result.log')
-    logger_result = get_logger('exp_result', log_file)
+    log_file = osp.join(workdir, 'results.log')
+    logger_result = get_logger('exp_result', log_file, exp_cfg['verbose'])
 
     # load dataset
     dataset = data_cfg['dataset']
     metapath_list, node_feature_list, node_type_mapping, adjacency_matrix, labels, (
         train_indices, val_indices, test_indices) = load_data(dataset, project_root)
 
+    num_cls = np.max(labels) + 1
     # # 1-0
     # metapaths = []
     # for node_id in range(4057):
@@ -197,7 +196,7 @@ if __name__ == '__main__':
     exp_results = {}
     for key in [
         'train_loss', 'train_acc', 'val_loss', 'val_acc', 'test_acc',
-        'macro_f1', 'micro_f1', 'time_elapsed'
+        'macro_f1', 'micro_f1', 'time_elapsed', 'confusion_mat',
     ]:
         exp_results[key] = []
 
@@ -210,6 +209,7 @@ if __name__ == '__main__':
         macro_f1='Macro-F1',
         micro_f1='Micro-F1',
         time_elapsed='Time_Elapsed',
+        confusion_mat='Confusion Matrix',
     )
 
     # build model
@@ -218,14 +218,6 @@ if __name__ == '__main__':
         node_feature_dim_list, num_metapaths, num_node_types,
         device,
     )
-    if apply_mlc:
-        meta_model = build_model(
-            model_type, model_cfg,
-            node_feature_dim_list, num_metapaths, num_node_types,
-            device,
-        )
-    else:
-        meta_model = None
 
     seed_list = exp_cfg['seed_list']
     num_repeat = len(seed_list)
@@ -235,7 +227,7 @@ if __name__ == '__main__':
         set_seed(seed)
 
         log_file = osp.join(workdir, f'{seed}.log')
-        logger = get_logger(f'{run_id}_{num_repeat}_seed{seed}', log_file)
+        logger = get_logger(f'{run_id}_{num_repeat}_seed{seed}', log_file, exp_cfg['verbose'])
         ckpt_file = osp.join(workdir, f'ckpt_seed{seed}.pt')
 
         model.init_weights()
@@ -246,7 +238,9 @@ if __name__ == '__main__':
         if apply_mlc:
             noise_transition_matrix = torch.eye(num_node_types, device=device)
             noise_transition_matrix = torch.autograd.Variable(noise_transition_matrix, requires_grad=True)
-            val_sampler_meta = IndicesSampler(val_indices, args.batch_size, shuffle=True, loop=True)
+            val_sampler_meta = Sampler(
+                metapath_list, val_indices, args.batch_size, args.sample_limit, device, shuffle=True
+            )
         else:
             noise_transition_matrix = None
             val_sampler_meta = None
@@ -255,8 +249,12 @@ if __name__ == '__main__':
         early_stopping = EarlyStopping(
             patience=args.patience, criterion=('val_loss', -1), margin=0, ckpt_file=ckpt_file
         )
-        train_sampler = IndicesSampler(train_indices, args.batch_size, shuffle=True)
-        val_sampler = IndicesSampler(val_indices, args.batch_size, shuffle=False)
+        train_sampler = Sampler(
+                metapath_list, train_indices, args.batch_size, args.sample_limit, device, shuffle=True
+        )
+        val_sampler = Sampler(
+                metapath_list, val_indices, args.batch_size, args.sample_limit, device, shuffle=False
+        )
 
         if apply_sft['filtering']:
             memory_bank = MemoryBank(num_nodes=num_nodes, device=device, **sft_cfg['filtering_cfg'])
@@ -270,34 +268,28 @@ if __name__ == '__main__':
             fluctuate_cnt = 0
             epoch_start_timer = time.time()
             for iteration in range(train_sampler.num_iterations()):
-                indices = train_sampler()
-                metapath_sampled_list = sample_metapath(
-                    indices, metapath_list, args.sample_limit, keep_intermediate=False
-                )
-                indices = to_torch(indices, device, indices=True)
-                metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
 
-                logits, embeddings = model(
-                    indices, metapath_sampled_list, node_type_mapping, node_feature_list
-                )
-                log_prob = F.log_softmax(logits, 1)
+                train_nodes, train_metapath_list = train_sampler.sample()
 
                 if LNL:
-                    train_labels = noisy_labels[indices]
+                    train_labels = noisy_labels[train_nodes]
                 else:
-                    train_labels = labels[indices]
+                    train_labels = labels[train_nodes]
 
                 if apply_mlc:
+                    meta_model = build_model(
+                        model_type, model_cfg,
+                        node_feature_dim_list, num_metapaths, num_node_types,
+                        device,
+                    )
                     meta_model.load_state_dict(model.state_dict())
 
-                    virtual_labels = train_labels
-
                     logits_virtual, _ = meta_model(
-                        indices, metapath_sampled_list, node_type_mapping, node_feature_list
+                        train_nodes, train_metapath_list, node_type_mapping, node_feature_list
                     )
                     log_prob_virtual = F.log_softmax(logits_virtual, 1)
                     log_prob_virtual = torch.matmul(log_prob_virtual, noise_transition_matrix)
-                    loss_virtual = F.nll_loss(log_prob_virtual, virtual_labels)
+                    loss_virtual = F.nll_loss(log_prob_virtual, train_labels)
 
                     meta_model.zero_grad()
                     grads = torch.autograd.grad(loss_virtual, (meta_model.params()), create_graph=True)
@@ -316,34 +308,27 @@ if __name__ == '__main__':
                     #         set_param(next_module, name_list[1:], value)
                     #     return
 
-
                     # for index, (name, param) in enumerate(meta_model.named_parameters()):
-                        # grad = torch.autograd.Variable(grads[index].detach().data)
-                        # new_value = param - grad * 1e-3
-                        # new_value = param - grads[index] * 1e-3
-                        # name_list = name.split('.')
-                        # set_param(meta_model, name_list, new_value)
-                        # local_grad = torch.autograd.grad(new_value, noise_transition_matrix)
-                        # local_grad_dict[name] = torch
-                        # db(new_value)
-                        # db(meta_model.node_feature_projector_list[0].weight)
+                    # grad = torch.autograd.Variable(grads[index].detach().data)
+                    # new_value = param - grad * 1e-3
+                    # new_value = param - grads[index] * 1e-3
+                    # name_list = name.split('.')
+                    # set_param(meta_model, name_list, new_value)
+                    # local_grad = torch.autograd.grad(new_value, noise_transition_matrix)
+                    # local_grad_dict[name] = torch
+                    # db(new_value)
+                    # db(meta_model.node_feature_projector_list[0].weight)
 
                     # for index, (name, param) in enumerate(meta_model.named_parameters()):
                     #     print(f'{index} {name} {param.mean()}')
 
-                    meta_indices = val_sampler_meta()
-                    metapath_sampled_list = sample_metapath(
-                        meta_indices, metapath_list, args.sample_limit, keep_intermediate=False
-                    )
-                    meta_indices = to_torch(meta_indices, device, indices=True)
-                    metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
-
+                    val_nodes, val_metapath_list = val_sampler_meta.sample()
                     logits_meta, _ = meta_model(
-                        meta_indices, metapath_sampled_list, node_type_mapping, node_feature_list
+                        val_nodes, val_metapath_list, node_type_mapping, node_feature_list
                     )
 
                     log_prob_meta = F.log_softmax(logits_meta, 1)
-                    loss_meta = F.nll_loss(log_prob_meta, labels[meta_indices])
+                    loss_meta = F.nll_loss(log_prob_meta, labels[val_nodes])
 
                     grad = torch.autograd.grad(loss_meta, noise_transition_matrix, only_inputs=True)[0]
 
@@ -351,12 +336,18 @@ if __name__ == '__main__':
                     noise_transition_matrix = torch.clamp(noise_transition_matrix, min=0)
                     noise_transition_matrix = noise_transition_matrix / torch.sum(noise_transition_matrix, dim=0)
 
-                    log_prob = torch.matmul(log_prob, noise_transition_matrix)
+                logits, embeddings = model(
+                    train_nodes, train_metapath_list, node_type_mapping, node_feature_list
+                )
+                log_prob = F.log_softmax(logits, 1)
+
+                if apply_mlc:
+                    log_prob = torch.matmul(log_prob, noise_transition_matrix.detach())
 
                 accurate_mask = (torch.argmax(log_prob, dim=-1) == train_labels)
 
                 if apply_sft['filtering']:
-                    selected_indices, fluctuating_indices = memory_bank.filter(epoch, indices, accurate_mask)
+                    selected_indices, fluctuating_indices = memory_bank.filter(epoch, train_nodes, accurate_mask)
 
                     fluctuate_cnt += len(fluctuating_indices)
                     # for debug only, when memory=1
@@ -423,16 +414,11 @@ if __name__ == '__main__':
             model.eval()
             val_log_prob = []
             for iteration in range(val_sampler.num_iterations()):
-                indices = val_sampler()
-                metapath_sampled_list = sample_metapath(
-                    indices, metapath_list, args.sample_limit, keep_intermediate=False
-                )
-                indices = to_torch(indices, device, indices=True)
-                metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
+                val_nodes, val_metapath_list = val_sampler.sample()
 
                 with torch.no_grad():
                     logits, embeddings = model(
-                        indices, metapath_sampled_list, node_type_mapping, node_feature_list
+                        val_nodes, val_metapath_list, node_type_mapping, node_feature_list
                     )
                     log_prob = F.log_softmax(logits, 1)
                 val_log_prob.append(log_prob)
@@ -450,6 +436,10 @@ if __name__ == '__main__':
                   f' | Val_Loss {val_loss:.4f} | Val_Accuracy {val_acc:.4f}'
             if apply_sft['filtering']:
                 msg += f' | Fluctuate_Ratio {fluctuate_ratio:.3f}'
+            if apply_mlc:
+                msg += f' | Noise_Transition_Matrix'
+                for num in list(noise_transition_matrix.view(-1)):
+                    msg += f' {num.item(): .4f}'
             logger.info(msg)
             record = dict(
                 epoch=epoch,
@@ -458,6 +448,8 @@ if __name__ == '__main__':
                 val_loss=val_loss,
                 val_acc=val_acc,
             )
+            if apply_mlc:
+                record['T'] = to_np(noise_transition_matrix.clone().reshape(-1))
             best_record, msg = early_stopping.record(record=record, model=model)
             logger.info(msg)
             if best_record is not None:
@@ -466,29 +458,31 @@ if __name__ == '__main__':
                 for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc']:
                     msg.append(f'{display[term]} {best_record[term]:.6f}')
                 msg = ' | '.join(msg)
+                if apply_mlc:
+                    msg += ' | Noise_Transition_Matrix'
+                    for val in list(best_record['T']):
+                        msg += f' {val.item():.4f}'
                 logger.info(msg)
                 for key, value in best_record.items():
-                    exp_results[key].append(value)
+                    if key != 'T':
+                        exp_results[key].append(value)
                 break
 
         test_start_timer = time.time()
-        test_sampler = IndicesSampler(test_indices, args.batch_size, shuffle=False)
+        test_sampler = Sampler(
+                metapath_list, test_indices, args.batch_size, args.sample_limit, device, shuffle=False
+        )
         model.load_state_dict(torch.load(ckpt_file))
         os.remove(ckpt_file)
         model.eval()
         test_logits = []
         test_embeddings = []
         for iteration in range(test_sampler.num_iterations()):
-            indices = test_sampler()
-            metapath_sampled_list = sample_metapath(
-                indices, metapath_list, args.sample_limit, keep_intermediate=False
-            )
-            indices = to_torch(indices, device, indices=True)
-            metapath_sampled_list = to_torch(metapath_sampled_list, device, indices=True)
+            test_nodes, test_metapath_list = test_sampler.sample()
 
             with torch.no_grad():
                 logits, embeddings = model(
-                    indices, metapath_sampled_list, node_type_mapping, node_feature_list
+                    test_nodes, test_metapath_list, node_type_mapping, node_feature_list
                 )
 
             test_logits.append(logits)
@@ -506,16 +500,15 @@ if __name__ == '__main__':
 
         test_embeddings = to_np(test_embeddings)
         test_labels = to_np(labels[test_indices])
-        train_ratio_list = exp_cfg['evaluate_cfg']['svm_cfg']['train_ratio_list']
 
         test_start_timer = time.time()
-        svm_results = svm_test(test_embeddings, test_labels, seed, train_ratio_list=train_ratio_list)
+        svm_results = svm_test(test_embeddings, test_labels, seed=seed, **exp_cfg['evaluate_cfg'])
         test_end_timer = time.time()
         test_time = test_end_timer - test_start_timer
         msg = f'SVM Test | Time {test_time:.4f}'
         logger.info(msg)
 
-        for key in ['macro_f1', 'micro_f1']:
+        for key in ['macro_f1', 'micro_f1', 'confusion_mat']:
             value = svm_results[key]
             exp_results[key].append(value['mean'])
             logger.info(value['msg'])
@@ -527,34 +520,34 @@ if __name__ == '__main__':
         logger.info(msg)
 
 
-    def display_result(result, term, logger, display_postfix=''):
+    def display_result(result, term, logger):
         msg = ' | '.join([f'{num:.6f}' for num in result])
-        msg = f'{display[term] + display_postfix}: {msg}'
+        msg = f'{display[term]}: {msg}'
         logger.info(msg)
         mean = np.mean(result)
         std = np.std(result)
-        msg = f'{display[term] + display_postfix} Summary: {mean:.6f} ~ {std:.6f}'
+        msg = f'{display[term]} Summary: {mean:.6f} ~ {std:.6f}'
         logger.info(msg)
-        summary = {term: f'{mean:.4f} ~ {std:.4f}'}
+        summary = {term: f'{mean:.4f}'}
         return summary
-
 
     summary_dict = {}
     for term in ['train_loss', 'train_acc', 'val_loss', 'val_acc']:
         summary = display_result(exp_results[term], term, logger_result)
         summary_dict.update(summary)
     logger_result.info('__________Results__________')
-    train_ratio_list = exp_cfg['evaluate_cfg']['svm_cfg']['train_ratio_list']
-    for term in ['macro_f1', 'micro_f1']:
-        results = np.array(exp_results[term])
-        msg = []
-        for index, train_ratio in enumerate(train_ratio_list):
-            summary = display_result(results[:, index], term, logger_result, display_postfix=f'({train_ratio:.1f})')
-            summary_dict.update(summary)
-
-    for term in ['test_acc', 'time_elapsed']:
+    for term in ['macro_f1', 'micro_f1', 'test_acc', 'time_elapsed']:
         summary = display_result(exp_results[term], term, logger_result)
         summary_dict.update(summary)
+
+    result = np.stack(exp_results['confusion_mat'])
+    result = np.sum(result, axis=0)
+    msg = 'Confusion Matrix:\n'
+    for i, val in enumerate(result):
+        msg += f'{val:.2f},'
+        if (i + 1) % num_cls == 0:
+            msg += '\n'
+    logger_result.info(msg)
 
     summary_msg = ['', tag]
     for term in ['macro_f1', 'micro_f1', 'test_acc']:
@@ -563,3 +556,7 @@ if __name__ == '__main__':
 
     summary_msg = ' | '.join(summary_msg)
     logger_result.info(summary_msg)
+
+
+if __name__ == '__main__':
+    main()

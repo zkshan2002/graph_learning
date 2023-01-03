@@ -399,3 +399,242 @@
 | exp2 HAN IMDB u4 SFT_1_4_04_05_01 | 0.5335 ~ 0.0062 | 0.5365 ~ 0.0074 | 0.4745 ~ 0.0047 |
 | exp2 HAN IMDB u5 SFT_1_4_04_05_01 | 0.5116 ~ 0.0114 | 0.5179 ~ 0.0112 | 0.4338 ~ 0.0064 |
 
+### Group 3
+
+- description
+  - now corrupt_ratio is fixed
+- known bugs
+  - in HAN, setting type_aware_semantic to True in single control type dataset improves performance
+- common settings
+  - HAN
+  - repeat=5
+
+#### backup
+##### exp0 IMDB
+
+|    Tag    |    Macro-F1     |    Micro-F1     |    Accuracy     |
+|:---------:|:---------------:|:---------------:|:---------------:|
+| exp0 IMDB | 0.6181 ~ 0.0042 | 0.6201 ~ 0.0044 | 0.5981 ~ 0.0029 | 
+
+##### exp1 IMDB #noise
+
+|     Tag      |    Macro-F1     |    Micro-F1     |    Accuracy     |
+|:------------:|:---------------:|:---------------:|:---------------:|
+|  exp0 IMDB   | 0.6181 ~ 0.0042 | 0.6201 ~ 0.0044 | 0.5981 ~ 0.0029 | 
+| exp1 IMDB p1 | 0.5953 ~ 0.0078 | 0.5974 ~ 0.0073 | 0.5651 ~ 0.0048 | 
+| exp1 IMDB p2 | 0.5846 ~ 0.0054 | 0.5868 ~ 0.0054 | 0.5399 ~ 0.0059 | 
+| exp1 IMDB p3 | 0.5764 ~ 0.0046 | 0.5784 ~ 0.0040 | 0.4889 ~ 0.0048 | 
+| exp1 IMDB p4 | 0.5665 ~ 0.0085 | 0.5708 ~ 0.0089 | 0.4644 ~ 0.0055 | 
+| exp1 IMDB p5 | 0.5632 ~ 0.0063 | 0.5671 ~ 0.0064 | 0.4107 ~ 0.0055 | 
+
+|     Tag      |    Macro-F1     |    Micro-F1     |    Accuracy     |
+|:------------:|:---------------:|:---------------:|:---------------:|
+|  exp0 IMDB   | 0.6181 ~ 0.0042 | 0.6201 ~ 0.0044 | 0.5981 ~ 0.0029 | 
+| exp1 IMDB u1 | 0.5966 ~ 0.0085 | 0.5989 ~ 0.0080 | 0.5770 ~ 0.0040 | 
+| exp1 IMDB u2 | 0.5788 ~ 0.0090 | 0.5820 ~ 0.0083 | 0.5395 ~ 0.0041 | 
+| exp1 IMDB u3 | 0.5541 ~ 0.0113 | 0.5577 ~ 0.0101 | 0.4988 ~ 0.0063 | 
+| exp1 IMDB u4 | 0.5263 ~ 0.0071 | 0.5303 ~ 0.0074 | 0.4704 ~ 0.0088 | 
+| exp1 IMDB u5 | 0.5060 ~ 0.0098 | 0.5133 ~ 0.0091 | 0.4249 ~ 0.0080 | 
+
+##### exp2 IMDB u4 mlc_#vlr_#Tlr
+
+|            Tag             |    Macro-F1     |    Micro-F1     |    Accuracy     |
+|:--------------------------:|:---------------:|:---------------:|:---------------:|
+|        exp1 IMDB p4        | 0.5665 ~ 0.0085 | 0.5708 ~ 0.0089 | 0.4644 ~ 0.0055 | 
+| exp2 IMDB p4 mlc_2e-4_1e-2 | 0.5624 ~ 0.0084 | 0.5672 ~ 0.0087 | 0.4648 ~ 0.0074 | 
+| exp2 IMDB p4 mlc_2e-4_5e-2 | 0.5632 ~ 0.0082 | 0.5680 ~ 0.0084 | 0.4648 ~ 0.0074 | 
+| exp2 IMDB p4 mlc_2e-4_1e-1 | 0.5629 ~ 0.0080 | 0.5678 ~ 0.0082 | 0.4645 ~ 0.0071 | 
+| exp2 IMDB p4 mlc_5e-4_1e-2 | 0.5627 ~ 0.0087 | 0.5675 ~ 0.0088 | 0.4645 ~ 0.0075 | 
+| exp2 IMDB p4 mlc_5e-4_5e-2 | 0.5630 ~ 0.0083 | 0.5678 ~ 0.0085 | 0.4644 ~ 0.0078 | 
+| exp2 IMDB p4 mlc_5e-4_1e-1 | 0.5633 ~ 0.0079 | 0.5679 ~ 0.0081 | 0.4644 ~ 0.0068 | 
+| exp2 IMDB p4 mlc_1e-3_1e-2 | 0.5629 ~ 0.0081 | 0.5676 ~ 0.0083 | 0.4647 ~ 0.0073 | 
+| exp2 IMDB p4 mlc_1e-3_5e-2 | 0.5623 ~ 0.0080 | 0.5671 ~ 0.0081 | 0.4644 ~ 0.0072 |
+| exp2 IMDB p4 mlc_1e-3_1e-1 | 0.5631 ~ 0.0086 | 0.5679 ~ 0.0088 | 0.4634 ~ 0.0074 | 
+
+|            Tag             |    Macro-F1     |    Micro-F1     |    Accuracy     |
+|:--------------------------:|:---------------:|:---------------:|:---------------:|
+|        exp1 IMDB u4        | 0.5263 ~ 0.0071 | 0.5303 ~ 0.0074 | 0.4704 ~ 0.0088 | 
+| exp2 IMDB u4 mlc_1e-2_1e-1 | 0.5240 ~ 0.0102 | 0.5277 ~ 0.0094 | 0.4631 ~ 0.0099 | 
+| exp2 IMDB u4 mlc_1e-2_1e-2 | 0.5248 ~ 0.0131 | 0.5281 ~ 0.0126 | 0.4718 ~ 0.0064 | 
+| exp2 IMDB u4 mlc_1e-2_1e-3 | 0.5261 ~ 0.0131 | 0.5293 ~ 0.0127 | 0.4717 ~ 0.0065 | 
+
+
+#### exp0 noise_u
+
+- reduce sample_limit from 512 to 128, now as noise ratio increases, performance drop more normally
+- further reducing 128 to 64 has no dramatic effect
+
+|               Tag               |    Macro-F1     |    Micro-F1     |    Accuracy     |
+|:-------------------------------:|:---------------:|:---------------:|:---------------:|
+|            exp0 DBLP            | 0.9303 ~ 0.0034 | 0.9349 ~ 0.0031 | 0.9351 ~ 0.0042 | 
+|      exp0 DBLP noise_u 0.1      | 0.9306 ~ 0.0049 | 0.9349 ~ 0.0046 | 0.9220 ~ 0.0079 | 
+|      exp0 DBLP noise_u 0.2      | 0.9275 ~ 0.0037 | 0.9324 ~ 0.0034 | 0.9167 ~ 0.0096 | 
+|      exp0 DBLP noise_u 0.3      | 0.9158 ~ 0.0050 | 0.9213 ~ 0.0042 | 0.8762 ~ 0.0181 | 
+|      exp0 DBLP noise_u 0.4      | 0.8782 ~ 0.0650 | 0.8842 ~ 0.0641 | 0.8286 ~ 0.0873 | 
+|      exp0 DBLP noise_u 0.5      | 0.7733 ~ 0.0643 | 0.7828 ~ 0.0627 | 0.6585 ~ 0.0731 | 
+|       exp0 DBLP sample 64       | 0.9296 ~ 0.0015 | 0.9342 ~ 0.0011 | 0.9347 ~ 0.0037 | 
+| exp0 DBLP sample 64 noise_u 0.1 | 0.9251 ~ 0.0023 | 0.9296 ~ 0.0021 | 0.9223 ~ 0.0050 | 
+| exp0 DBLP sample 64 noise_u 0.2 | 0.9223 ~ 0.0051 | 0.9275 ~ 0.0045 | 0.9066 ~ 0.0102 | 
+| exp0 DBLP sample 64 noise_u 0.3 | 0.9161 ~ 0.0078 | 0.9216 ~ 0.0072 | 0.8888 ~ 0.0330 | 
+| exp0 DBLP sample 64 noise_u 0.4 | 0.8495 ~ 0.0542 | 0.8590 ~ 0.0507 | 0.7824 ~ 0.0728 | 
+| exp0 DBLP sample 64 noise_u 0.5 | 0.7811 ~ 0.0569 | 0.7913 ~ 0.0553 | 0.6606 ~ 0.0533 |
+
+|               Tag               |    Macro-F1     |    Micro-F1     |    Accuracy     |
+|:-------------------------------:|:---------------:|:---------------:|:---------------:|
+|            exp0 IMDB            | 0.6200 ~ 0.0035 | 0.6215 ~ 0.0043 | 0.6052 ~ 0.0044 | 
+|      exp0 IMDB noise_u 0.1      | 0.6039 ~ 0.0067 | 0.6060 ~ 0.0066 | 0.5832 ~ 0.0024 | 
+|      exp0 IMDB noise_u 0.2      | 0.5814 ~ 0.0063 | 0.5841 ~ 0.0055 | 0.5515 ~ 0.0037 | 
+|      exp0 IMDB noise_u 0.3      | 0.5618 ~ 0.0069 | 0.5653 ~ 0.0066 | 0.5034 ~ 0.0056 | 
+|      exp0 IMDB noise_u 0.4      | 0.5359 ~ 0.0072 | 0.5396 ~ 0.0066 | 0.4770 ~ 0.0076 | 
+|      exp0 IMDB noise_u 0.5      | 0.5087 ~ 0.0097 | 0.5147 ~ 0.0110 | 0.4249 ~ 0.0068 | 
+|       exp0 IMDB sample 64       | 0.6203 ~ 0.0027 | 0.6220 ~ 0.0036 | 0.6030 ~ 0.0050 | 
+| exp0 IMDB sample 64 noise_u 0.1 | 0.6011 ~ 0.0059 | 0.6031 ~ 0.0061 | 0.5823 ~ 0.0025 | 
+| exp0 IMDB sample 64 noise_u 0.2 | 0.5811 ~ 0.0052 | 0.5836 ~ 0.0053 | 0.5486 ~ 0.0036 | 
+| exp0 IMDB sample 64 noise_u 0.3 | 0.5600 ~ 0.0106 | 0.5634 ~ 0.0099 | 0.5017 ~ 0.0040 | 
+| exp0 IMDB sample 64 noise_u 0.4 | 0.5360 ~ 0.0080 | 0.5394 ~ 0.0080 | 0.4756 ~ 0.0079 | 
+| exp0 IMDB sample 64 noise_u 0.5 | 0.5110 ~ 0.0066 | 0.5175 ~ 0.0062 | 0.4271 ~ 0.0064 | 
+
+#### exp1 noise_u 0.4 sft_filter
+
+- best hyperparameter: memory = 1, warmup = 4
+- fluctuate ratio 0 at beginning, then grow to ~0.10
+
+|                          Tag                          | Macro-F1 | Micro-F1 | Accuracy |
+|:-----------------------------------------------------:|:--------:|:--------:|:--------:|
+|            exp0 DBLP sample 64 noise_u 0.4            |  0.8495  |  0.8590  |  0.7824  | 
+| exp1 DBLP noise_u 0.4sft_filter_memory 1 sft_warmup 2 |  0.8327  |  0.8413  |  0.7545  | 
+| exp1 DBLP noise_u 0.4sft_filter_memory 1 sft_warmup 4 |  0.9013  |  0.9075  |  0.8356  | 
+| exp1 DBLP noise_u 0.4sft_filter_memory 1 sft_warmup 6 |  0.8625  |  0.8703  |  0.7889  | 
+| exp1 DBLP noise_u 0.4sft_filter_memory 1 sft_warmup 8 |  0.8495  |  0.8590  |  0.7824  | 
+| exp1 DBLP noise_u 0.4sft_filter_memory 2 sft_warmup 2 |  0.8488  |  0.8580  |  0.7490  | 
+| exp1 DBLP noise_u 0.4sft_filter_memory 2 sft_warmup 4 |  0.8894  |  0.8967  |  0.8161  | 
+| exp1 DBLP noise_u 0.4sft_filter_memory 2 sft_warmup 6 |  0.8655  |  0.8732  |  0.7925  | 
+| exp1 DBLP noise_u 0.4sft_filter_memory 2 sft_warmup 8 |  0.8495  |  0.8590  |  0.7824  | 
+
+- sft_filter improves f1 by ~0.02 when noise ratio is large
+
+|               Tag                | Macro-F1 | Micro-F1 | Accuracy |
+|:--------------------------------:|:--------:|:--------:|:--------:|
+|            exp0 DBLP             |  0.9303  |  0.9349  |  0.9351  | 
+|      exp0 DBLP noise_u 0.1       |  0.9306  |  0.9349  |  0.9220  | 
+|      exp0 DBLP noise_u 0.2       |  0.9275  |  0.9324  |  0.9167  | 
+|      exp0 DBLP noise_u 0.3       |  0.9158  |  0.9213  |  0.8762  | 
+|      exp0 DBLP noise_u 0.4       |  0.8782  |  0.8842  |  0.8286  | 
+|      exp0 DBLP noise_u 0.5       |  0.7733  |  0.7828  |  0.6585  | 
+
+|               Tag                | Macro-F1 | Micro-F1 | Accuracy |
+|:--------------------------------:|:--------:|:--------:|:--------:|
+|       exp0 DBLP sample 64        |  0.9296  |  0.9342  |  0.9347  | 
+| exp0 DBLP sample 64 noise_u 0.1  |  0.9251  |  0.9296  |  0.9223  | 
+| exp0 DBLP sample 64 noise_u 0.2  |  0.9223  |  0.9275  |  0.9066  | 
+| exp0 DBLP sample 64 noise_u 0.3  |  0.9161  |  0.9216  |  0.8888  | 
+| exp0 DBLP sample 64 noise_u 0.4  |  0.8495  |  0.8590  |  0.7824  | 
+| exp0 DBLP sample 64 noise_u 0.5  |  0.7811  |  0.7913  |  0.6606  |
+|       exp1 DBLP sft_filter       |  0.9293  |  0.9338  |  0.9332  | 
+| exp1 DBLP noise_u 0.1 sft_filter |  0.9273  |  0.9320  |  0.9240  |
+| exp1 DBLP noise_u 0.2 sft_filter |  0.9204  |  0.9257  |  0.9119  |
+| exp1 DBLP noise_u 0.3 sft_filter |  0.9161  |  0.9215  |  0.8814  | 
+| exp1 DBLP noise_u 0.4 sft_filter |  0.9013  |  0.9075  |  0.8356  | 
+| exp1 DBLP noise_u 0.5 sft_filter |  0.7981  |  0.8083  |  0.6794  | 
+
+|               Tag                | Macro-F1 | Micro-F1 | Accuracy |
+|:--------------------------------:|:--------:|:--------:|:--------:|
+| exp0 DBLP sample 64 noise_u 0.4  |  0.8495  |  0.8590  |  0.7824  | 
+| exp1 DBLP noise_u 0.4 sft_filter |  0.9013  |  0.9075  |  0.8356  | 
+
+
+IMDB
+
+|                 Tag                  | Macro-F1 | Micro-F1 | Accuracy |
+|:------------------------------------:|:--------:|:--------:|:--------:|
+|        exp0 IMDB noise_u 0.4         |  0.5359  |  0.5396  |  0.4770  | 
+| exp1 IMDB noise_u 0.4 sft_filter 1 2 |  0.5355  |  0.5389  |  0.4730  | 
+| exp1 IMDB noise_u 0.4 sft_filter 1 4 |  0.5356  |  0.5390  |  0.4711  | 
+| exp1 IMDB noise_u 0.4 sft_filter 1 6 |  0.5345  |  0.5383  |  0.4722  | 
+| exp1 IMDB noise_u 0.4 sft_filter 1 8 |  0.5360  |  0.5396  |  0.4727  | 
+| exp1 IMDB noise_u 0.4 sft_filter 2 2 |  0.5355  |  0.5387  |  0.4777  | 
+| exp1 IMDB noise_u 0.4 sft_filter 2 4 |  0.5341  |  0.5373  |  0.4713  | 
+| exp1 IMDB noise_u 0.4 sft_filter 2 6 |  0.5359  |  0.5396  |  0.4632  | 
+| exp1 IMDB noise_u 0.4 sft_filter 2 8 |  0.5339  |  0.5373  |  0.4657  | 
+
+
+|                 Tag                  | Macro-F1 | Micro-F1 | Accuracy |
+|:------------------------------------:|:--------:|:--------:|:--------:|
+|              exp0 DBLP               |  0.9303  |  0.9349  |  0.9351  | 
+|        exp0 DBLP noise_u 0.1         |  0.9306  |  0.9349  |  0.9220  | 
+|        exp0 DBLP noise_u 0.2         |  0.9275  |  0.9324  |  0.9167  | 
+|        exp0 DBLP noise_u 0.3         |  0.9158  |  0.9213  |  0.8762  | 
+|        exp0 DBLP noise_u 0.4         |  0.8782  |  0.8842  |  0.8286  | 
+| exp1 DBLP noise_u 0.4 sft_filter 1 2 |  0.8789  |  0.8851  |  0.8135  | 
+| exp1 DBLP noise_u 0.4 sft_filter 1 4 | 0.8826 | 0.8887 | 0.8296 | 
+| exp1 DBLP noise_u 0.4 sft_filter 1 6 | 0.8535 | 0.8611 | 0.7754 | 
+| exp1 DBLP noise_u 0.4 sft_filter 1 8 | 0.8531 | 0.8609 | 0.7713 | 
+| exp1 DBLP noise_u 0.4 sft_filter 2 2 | 0.8835 | 0.8898 | 0.8253 | 
+| exp1 DBLP noise_u 0.4 sft_filter 2 4 | 0.8763 | 0.8826 | 0.8092 | 
+| exp1 DBLP noise_u 0.4 sft_filter 2 6 | 0.8793 | 0.8852 | 0.8276 | 
+| exp1 DBLP noise_u 0.4 sft_filter 2 8 | 0.8662 | 0.8729 | 0.8034 | 
+
+
+
+grid search for best sft_filter param conditioned on noise ratio
+128
+
+|                 Tag                  | Macro-F1 | Micro-F1 | Accuracy | Comment |
+|:------------------------------------:|:--------:|:--------:|:--------:|:-------:|
+|             exp1 DBLP128             |  0.9303  |  0.9349  |  0.9351  |   0.0   |
+|        exp1 DBLP noise_u 0.1         |  0.9306  |  0.9349  |  0.9220  |   0.1   |
+| exp1 DBLP noise_u 0.1 sft_filter 1 2 |  0.9269  |  0.9320  |  0.9191  |         | 
+| exp1 DBLP noise_u 0.1 sft_filter 1 4 |  0.9274  |  0.9321  |  0.9201  |         | 
+| exp1 DBLP noise_u 0.1 sft_filter 1 6 |  0.9272  |  0.9318  |  0.9184  |         | 
+| exp1 DBLP noise_u 0.1 sft_filter 1 8 |  0.9301  |  0.9344  |  0.9221  |  0.1*   | 
+|        exp1 DBLP noise_u 0.2         |  0.9275  |  0.9324  |  0.9167  |   0.2   |
+| exp1 DBLP noise_u 0.2 sft_filter 1 2 |  0.9217  |  0.9270  |  0.9035  |         | 
+| exp1 DBLP noise_u 0.2 sft_filter 1 4 |  0.9269  |  0.9317  |  0.9121  |  0.2*   |
+| exp1 DBLP noise_u 0.2 sft_filter 1 6 |  0.9257  |  0.9305  |  0.9066  |         |
+| exp1 DBLP noise_u 0.2 sft_filter 1 8 |  0.9238  |  0.9289  |  0.9052  |         |
+|        exp1 DBLP noise_u 0.3         |  0.9158  |  0.9213  |  0.8762  |   0.3   |
+| exp1 DBLP noise_u 0.3 sft_filter 1 2 |  0.9175  |  0.9229  |  0.8631  |         |
+| exp1 DBLP noise_u 0.3 sft_filter 1 4 |  0.9212  |  0.9265  |  0.8793  |         |
+| exp1 DBLP noise_u 0.3 sft_filter 1 6 |  0.9239  |  0.9287  |  0.8910  |  0.3*   |
+| exp1 DBLP noise_u 0.3 sft_filter 1 8 |  0.9164  |  0.9221  |  0.8764  |         |
+|        exp1 DBLP noise_u 0.4         |  0.8782  |  0.8842  |  0.8286  |   0.4   |
+| exp1 DBLP noise_u 0.4 sft_filter 1 2 |  0.8789  |  0.8851  |  0.8135  |         |
+| exp1 DBLP noise_u 0.4 sft_filter 1 4 |  0.8826  |  0.8887  |  0.8296  |  0.4*   |
+| exp1 DBLP noise_u 0.4 sft_filter 1 6 |  0.8535  |  0.8611  |  0.7754  |         |
+| exp1 DBLP noise_u 0.4 sft_filter 1 8 |  0.8531  |  0.8609  |  0.7713  |         |
+|        exp1 DBLP noise_u 0.5         |  0.7733  |  0.7828  |  0.6585  |   0.5   |
+| exp1 DBLP noise_u 0.5 sft_filter 1 2 |  0.7614  |  0.7699  |  0.6289  |         |
+| exp1 DBLP noise_u 0.5 sft_filter 1 4 |  0.7741  |  0.7824  |  0.6550  |         |
+| exp1 DBLP noise_u 0.5 sft_filter 1 6 |  0.7829  |  0.7923  |  0.6669  |         |
+| exp1 DBLP noise_u 0.5 sft_filter 1 8 |  0.7851  |  0.7946  |  0.6681  |  0.5*   |
+
+IMDB: no improvement
+
+|                 Tag                  | Macro-F1 | Micro-F1 | Accuracy |
+|:------------------------------------:|:--------:|:--------:|:--------:|
+|        exp2 IMDB noise_u 0.1         |  0.6039  |  0.6060  |  0.5832  | 
+| exp2 IMDB noise_u 0.1 sft_filter 1 2 |  0.6020  |  0.6039  |  0.5826  | 
+| exp2 IMDB noise_u 0.1 sft_filter 1 4 |  0.6017  |  0.6035  |  0.5836  | 
+| exp2 IMDB noise_u 0.1 sft_filter 1 6 |  0.6021  |  0.6040  |  0.5850  | 
+| exp2 IMDB noise_u 0.1 sft_filter 1 8 |  0.6019  |  0.6039  |  0.5842  | 
+|        exp2 IMDB noise_u 0.2         |  0.5814  |  0.5841  |  0.5515  | 
+| exp2 IMDB noise_u 0.2 sft_filter 1 2 |  0.5823  |  0.5850  |  0.5515  | 
+| exp2 IMDB noise_u 0.2 sft_filter 1 4 |  0.5823  |  0.5852  |  0.5518  | 
+| exp2 IMDB noise_u 0.2 sft_filter 1 6 |  0.5823  |  0.5849  |  0.5506  | 
+| exp2 IMDB noise_u 0.2 sft_filter 1 8 |  0.5824  |  0.5852  |  0.5511  | 
+|        exp2 IMDB noise_u 0.3         |  0.5618  |  0.5653  |  0.5034  | 
+| exp2 IMDB noise_u 0.3 sft_filter 1 2 |  0.5618  |  0.5653  |  0.5028  | 
+| exp2 IMDB noise_u 0.3 sft_filter 1 4 |  0.5628  |  0.5664  |  0.5005  | 
+| exp2 IMDB noise_u 0.3 sft_filter 1 6 |  0.5623  |  0.5660  |  0.5040  | 
+| exp2 IMDB noise_u 0.3 sft_filter 1 8 |  0.5625  |  0.5656  |  0.5016  | 
+|        exp2 IMDB noise_u 0.4         |  0.5359  |  0.5396  |  0.4770  | 
+| exp2 IMDB noise_u 0.4 sft_filter 1 2 |  0.5362  |  0.5401  |  0.4755  | 
+| exp2 IMDB noise_u 0.4 sft_filter 1 4 |  0.5340  |  0.5372  |  0.4734  | 
+| exp2 IMDB noise_u 0.4 sft_filter 1 6 |  0.5377  |  0.5413  |  0.4749  | 
+| exp2 IMDB noise_u 0.4 sft_filter 1 8 |  0.5330  |  0.5368  |  0.4754  | 
+|        exp2 IMDB noise_u 0.5         |  0.5087  |  0.5147  |  0.4249  | 
+| exp2 IMDB noise_u 0.5 sft_filter 1 2 |  0.5096  |  0.5159  |  0.4304  | 
+| exp2 IMDB noise_u 0.5 sft_filter 1 4 |  0.5085  |  0.5150  |  0.4262  | 
+| exp2 IMDB noise_u 0.5 sft_filter 1 6 |  0.5093  |  0.5162  |  0.4282  | 
+| exp2 IMDB noise_u 0.5 sft_filter 1 8 |  0.5095  |  0.5162  |  0.4308  | 
+

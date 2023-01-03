@@ -1,7 +1,7 @@
 import os
 import os.path as osp
 import pickle
-from typing import List
+from typing import Optional, List
 
 import numpy as np
 import torch
@@ -15,12 +15,12 @@ def to_torch(data, device, indices=False):
     if isinstance(data, dict):
         return {key: to_torch(value, device, indices) for key, value in data.items()}
     assert isinstance(data, np.ndarray)
-    data = torch.from_numpy(data)
+    data = torch.from_numpy(data).to(device)
     if indices:
         data = data.to(torch.int64)
     else:
         data = data.to(torch.float32)
-    return data.to(device)
+    return data
 
 
 def to_np(data):
@@ -210,3 +210,94 @@ def __get_DBLP_statistics(project_dir):
     pdb.set_trace()
 
     return
+
+
+class MetapathDataset:
+    def __init__(self, id2type: np.array, adj_mat, feature_list, labels, metapath_list, device):
+        self.id2type = to_torch(id2type, device=device)
+        self.adj_mat = adj_mat
+        self.feature_list = to_torch(feature_list, device=device)
+        self.labels = labels
+        self.metapath_list = metapath_list
+
+        self.num_node_types = np.max(id2type) + 1
+        self.num_metapath_schemes = len(metapath_list)
+        self.num_target_nodes = labels.shape[0]
+        self.feature_dim_list = [node_feature.shape[1] for node_feature in feature_list]
+        self.num_cls = np.max(labels) + 1
+        return
+
+    def sample(self, target_nodes: np.array, sample_limit: int, keep_intermediate=False):
+        metapath_sampled_list = []
+        for metapath_id in range(self.num_metapath_schemes):
+            metapath_sampled = []
+            for target_node in target_nodes:
+                metapath_given_node = self.metapath_list[metapath_id][target_node]
+                _, neighbor_cnt = np.unique(metapath_given_node[:, 0], return_counts=True)
+                # sample with prob ~ cnt ^ 0.75
+                prob = []
+                for cnt in neighbor_cnt:
+                    prob += [cnt ** 0.75 / cnt] * cnt
+                prob = np.array(prob)
+                prob /= np.sum(prob)
+                num_available = metapath_given_node.shape[0]
+                num_sample = min(num_available, sample_limit)
+                if num_sample == 0:
+                    if keep_intermediate:
+                        length = metapath_given_node.shape[1]
+                    else:
+                        length = 2
+                    selected_metapaths = np.zeros((0, length), dtype=np.int32)
+                else:
+                    selected_indices = np.sort(np.random.choice(num_available, num_sample, replace=False, p=prob))
+                    selected_metapaths = metapath_given_node[selected_indices]
+                    if not keep_intermediate:
+                        selected_metapaths = selected_metapaths[:, [0, -1]]
+                metapath_sampled.append(selected_metapaths)
+            metapath_sampled = np.concatenate(metapath_sampled, axis=0)
+            metapath_sampled_list.append(metapath_sampled)
+
+        return metapath_sampled_list
+
+class Sampler:
+    def __init__(self, dataset: MetapathDataset, batch_size, sample_limit, device, shuffle, loop=False):
+        self.dataset = dataset
+        self.num_indices = dataset.num_target_nodes
+        self.all_indices = np.arange(self.num_indices, dtype=np.int64)
+        self.num_batch = batch_size
+        self.sample_limit = sample_limit
+        self.device = device
+        self.shuffle = shuffle
+        self.loop = loop
+        self.pointer = 0
+
+        self._reset()
+        return
+
+    def _reset(self):
+        self.pointer = 0
+        if self.shuffle:
+            np.random.shuffle(self.all_indices)
+        return
+
+    def num_iterations(self):
+        return int(np.ceil(self.num_indices / self.num_batch))
+
+    def sample(self):
+        def sample_indice():
+            indices = np.copy(self.all_indices[self.pointer:self.pointer + self.num_batch])
+            self.pointer += self.num_batch
+            if self.pointer >= self.num_indices:
+                self._reset()
+                if self.loop:
+                    self.pointer = self.num_batch - indices.shape[0]
+                    compensate = np.copy(self.all_indices[:self.pointer])
+                    indices = np.concatenate([indices, compensate], axis=0)
+
+            return indices
+
+        indices = sample_indice()
+        metapath_sampled_list = self.dataset.sample(indices, self.sample_limit, keep_intermediate=False)
+        indices = to_torch(indices, self.device, indices=True)
+        metapath_sampled_list = to_torch(metapath_sampled_list, self.device, indices=True)
+        return indices, metapath_sampled_list
