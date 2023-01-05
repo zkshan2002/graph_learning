@@ -170,9 +170,11 @@ class HAN(MetaModule):
             beta.unsqueeze(dim=-1) * h_metapath, dim=0
         ).view(-1, self.node_feature_dim * self.num_attention_heads)
 
-        cls_logits = self.cls_head(embeddings)
+        logits = self.cls_head(embeddings)
 
-        return cls_logits, embeddings
+        log_prob = F.log_softmax(logits, dim=1)
+
+        return log_prob
 
     def named_params2(self):
         result = []

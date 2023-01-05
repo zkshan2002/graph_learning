@@ -1,61 +1,53 @@
 import numpy as np
 import torch
 
-
-def apply_label_noise(dataset: str, labels: np.ndarray, pair_flip_rate, uniform_flip_rate, seed, fix_num):
-    assert not (pair_flip_rate > 0 and uniform_flip_rate > 0)
-    if pair_flip_rate > 0:
-        return _apply_pair_noise(dataset, labels, pair_flip_rate, seed, fix_num)
-    if uniform_flip_rate > 0:
-        return _apply_uniform_noise(labels, uniform_flip_rate, seed, fix_num)
+from utils.data import to_torch
+from utils.training import set_seed
 
 
-pairs_dict = {
+def apply_label_noise(dataset: str, labels: torch.tensor, noise_type, flip_rate, seed, fix_num, all_train_indices):
+    set_seed(seed)
+    flip_indices = _get_flip_indices(all_train_indices.shape[0], flip_rate, fix_num)
+    flip_indices = all_train_indices[flip_indices]
+    if noise_type == 'uniform':
+        noisy_labels = _apply_uniform_noise(labels, flip_indices)
+    elif noise_type == 'pair':
+        noisy_labels = _apply_pair_noise(dataset, labels, flip_indices)
+    else:
+        assert False
+    actual_flip_rate = torch.mean((noisy_labels != labels)[all_train_indices].to(torch.float32)).item()
+    return noisy_labels, actual_flip_rate
+
+
+def _get_flip_indices(num_total, flip_rate, fix_num) -> np.array:
+    if fix_num:
+        num_flip = int(num_total * flip_rate)
+        flip_indices = np.random.choice(num_total, num_flip, replace=False)
+    else:
+        mask = (np.random.rand(num_total) < flip_rate)
+        flip_indices = np.where(mask)[0]
+    return flip_indices
+
+
+def _apply_uniform_noise(labels: torch.tensor, flip_indices: np.array):
+    noisy_labels = torch.clone(labels)
+    num_cls = torch.max(labels) + 1
+    shift = torch.randint(1, num_cls, size=flip_indices.shape, dtype=torch.int64, device=labels.device)
+    noisy_labels[flip_indices] = (labels[flip_indices] + shift) % num_cls
+    return noisy_labels
+
+
+_pairs_dict = {
     'DBLP': [1, 0, 3, 2],  # 0: Database; 1: Data Mining; 2: AI; 3: Information Retrieval
     'IMDB': [1, 2, 0],  # 0: Action; 1: Comedy; 2: Drama
 }
 
 
-def _apply_pair_noise(dataset: str, labels: np.ndarray, flip_rate, seed, fix_num):
-    np.random.seed(seed)
-    num_labels = labels.shape[0]
-    noisy_labels = np.copy(labels)
-
-    if flip_rate > 0:
-        pairs = np.array(pairs_dict[dataset], dtype=np.int32)
-        if fix_num:
-            num_flip = int(num_labels * flip_rate)
-            flip_indices = np.random.choice(num_labels, num_flip, replace=False)
-        else:
-            mask = (np.random.rand(num_labels) < flip_rate)
-            flip_indices = np.where(mask)[0]
-        noisy_labels[flip_indices] = pairs[noisy_labels[flip_indices]]
-
-    flip_mask = (noisy_labels != labels)
-
-    return noisy_labels, flip_mask
-
-
-def _apply_uniform_noise(labels: np.ndarray, flip_rate, seed, fix_num):
-    np.random.seed(seed)
-    num_labels = labels.shape[0]
-    num_cls = np.max(labels) + 1
-    noisy_labels = np.copy(labels)
-
-    if flip_rate > 0:
-        if fix_num:
-            num_flip = int(num_labels * flip_rate)
-            flip_indices = np.random.choice(num_labels, num_flip, replace=False)
-        else:
-            mask = (np.random.rand(num_labels) < flip_rate)
-            flip_indices = np.where(mask)[0]
-            num_flip = flip_indices.shape[0]
-        shift = np.random.randint(1, num_cls, size=num_flip)
-        noisy_labels[flip_indices] = (labels[flip_indices] + shift) % num_cls
-
-    flip_mask = (noisy_labels != labels)
-
-    return noisy_labels, flip_mask
+def _apply_pair_noise(dataset: str, labels: torch.tensor, flip_indices: np.array):
+    noisy_labels = torch.clone(labels)
+    pairs = to_torch(_pairs_dict[dataset], device=labels.device, indices=True)
+    noisy_labels[flip_indices] = pairs[noisy_labels[flip_indices]]
+    return noisy_labels
 
 
 class MemoryBank:

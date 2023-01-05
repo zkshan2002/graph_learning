@@ -7,17 +7,17 @@ exp_cfg = dict(
                ],
     device_id=0,
     verbose=False,
-    evaluate_cfg=dict(
-        train_ratio=0.8,
-        repeat=10,
-    ),
 )
 
 train_cfg = dict(
     epoch=100,
-    patience=-1,
     batch_size=64,
     sample_limit=-1,
+    early_stop_cfg=dict(
+        warmup=-1,
+        patience=-1,
+        criterion=('Val_Micro_F1', 1),
+    ),
     optim_cfg=dict(
         lr=-1,
         weight_decay=0.001,
@@ -55,9 +55,9 @@ data_cfg = dict(
     ),
     noise_cfg=dict(
         apply=False,
+        flip_rate=0,
+        noise_type='uniform',
         seed=0,
-        pair_flip_rate=0.0,
-        uniform_flip_rate=0.0,
         fix_num=True,
     ),
 )
