@@ -787,3 +787,137 @@ IMDB: no improvement
 | exp2 IMDB noise_u 0.5 sft_filter 1 6 |  0.5093  |  0.5162  |  0.4282  | 
 | exp2 IMDB noise_u 0.5 sft_filter 1 8 |  0.5095  |  0.5162  |  0.4308  | 
 
+
+
+### Group 4
+
+changes:
+- reconstruct code
+- evaluation metric change
+  - based on classification results, with linear head
+- noise application change
+  - now strictly apply on training labels only, with fixed num
+
+#### exp1 DBLP64
+
+|           Tag           |     Train     |      Val      |     Test      |
+|:-----------------------:|:-------------:|:-------------:|:-------------:|
+|       exp1 DBLP64       | 0.9641 0.9669 | 0.9340 0.9388 | 0.9302 0.9350 | 
+| exp1 DBLP64 noise_u 0.1 | 0.8506 0.8553 | 0.9283 0.9348 | 0.9191 0.9252 | 
+| exp1 DBLP64 noise_u 0.2 | 0.7529 0.7595 | 0.9209 0.9264 | 0.9160 0.9212 | 
+| exp1 DBLP64 noise_u 0.3 | 0.6576 0.6667 | 0.9009 0.9091 | 0.9052 0.9117 | 
+| exp1 DBLP64 noise_u 0.4 | 0.5515 0.5605 | 0.8489 0.8588 | 0.8710 0.8795 | 
+| exp1 DBLP64 noise_u 0.5 | 0.3951 0.4227 | 0.6527 0.6978 | 0.6676 0.7074 | 
+
+|             Tag             |     Train     |      Val      |     Test      |
+|:---------------------------:|:-------------:|:-------------:|:-------------:|
+|       exp1 val DBLP64       | 0.9456 0.9496 | 0.9374 0.9422 | 0.9270 0.9327 |
+| exp1 val DBLP64 noise_u 0.1 | 0.8550 0.8602 | 0.9222 0.9279 | 0.9191 0.9243 |
+| exp1 val DBLP64 noise_u 0.2 | 0.7574 0.7630 | 0.9142 0.9205 | 0.9139 0.9197 |
+| exp1 val DBLP64 noise_u 0.3 | 0.6668 0.6780 | 0.8915 0.8988 | 0.9044 0.9109 |
+| exp1 val DBLP64 noise_u 0.4 | 0.4913 0.5215 | 0.8167 0.8400 | 0.8306 0.8509 |
+| exp1 val DBLP64 noise_u 0.5 | 0.3806 0.4188 | 0.7252 0.7694 | 0.7434 0.7792 |
+
+merging together:
+
+|           Tag           |     Train     |      Val      |     Test      |
+|:-----------------------:|:-------------:|:-------------:|:-------------:|
+|       exp1 DBLP64       | 0.9548 0.9583 | 0.9357 0.9405 | 0.9286 0.9339 |
+| exp1 DBLP64 noise_u 0.1 | 0.8528 0.8578 | 0.9253 0.9313 | 0.9191 0.9247 |
+| exp1 DBLP64 noise_u 0.2 | 0.7551 0.7612 | 0.9176 0.9234 | 0.9150 0.9204 |
+| exp1 DBLP64 noise_u 0.3 | 0.6622 0.6724 | 0.8962 0.9040 | 0.9048 0.9113 |
+| exp1 DBLP64 noise_u 0.4 | 0.5214 0.5410 | 0.8328 0.8494 | 0.8508 0.8652 |
+| exp1 DBLP64 noise_u 0.5 | 0.3879 0.4208 | 0.6889 0.7336 | 0.7055 0.7433 |
+
+- this is inconsistent with previous exp results
+  - performs better at 0.3(+0.02) and 0.4(+0.09)
+  - probably because in previous exp, noise of training label is of random scale
+
+|               Tag               |  Test_Micro_F1  |
+|:-------------------------------:|:---------------:|
+|       exp0 DBLP sample 64       | 0.9347 ~ 0.0037 | 
+| exp0 DBLP sample 64 noise_u 0.1 | 0.9223 ~ 0.0050 | 
+| exp0 DBLP sample 64 noise_u 0.2 | 0.9066 ~ 0.0102 | 
+| exp0 DBLP sample 64 noise_u 0.3 | 0.8888 ~ 0.0330 | 
+| exp0 DBLP sample 64 noise_u 0.4 | 0.7824 ~ 0.0728 | 
+| exp0 DBLP sample 64 noise_u 0.5 | 0.6606 ~ 0.0533 |
+
+#### exp1 IMDB64
+- in IMDB, results in low noise are worse than previous
+
+|            Tag             |     Train     |      Val      |     Test      |
+|:--------------------------:|:-------------:|:-------------:|:-------------:|
+|       exp1 IMDB64_10       | 0.8872 0.8881 | 0.5804 0.5836 | 0.5832 0.5859 |
+| exp1 IMDB64_10 noise_u 0.1 | 0.8882 0.8897 | 0.5603 0.5672 | 0.5649 0.5700 |
+| exp1 IMDB64_10 noise_u 0.2 | 0.9006 0.9016 | 0.5451 0.5494 | 0.5275 0.5341 |
+| exp1 IMDB64_10 noise_u 0.3 | 0.8707 0.8717 | 0.4867 0.4988 | 0.5000 0.5110 |
+| exp1 IMDB64_10 noise_u 0.4 | 0.8726 0.8735 | 0.4913 0.5042 | 0.4744 0.4846 |
+| exp1 IMDB64_10 noise_u 0.5 | 0.8368 0.8391 | 0.4288 0.4464 | 0.4247 0.4388 |
+
+|               Tag               |  Test_Micro_F1  |
+|:-------------------------------:|:---------------:|
+|       exp0 IMDB sample 64       | 0.6030 ~ 0.0050 | 
+| exp0 IMDB sample 64 noise_u 0.1 | 0.5823 ~ 0.0025 | 
+| exp0 IMDB sample 64 noise_u 0.2 | 0.5486 ~ 0.0036 | 
+| exp0 IMDB sample 64 noise_u 0.3 | 0.5017 ~ 0.0040 | 
+| exp0 IMDB sample 64 noise_u 0.4 | 0.4756 ~ 0.0079 | 
+| exp0 IMDB sample 64 noise_u 0.5 | 0.4271 ~ 0.0064 | 
+
+#### exp2 IMDB64_10 sft_filter
+full table
+
+|                    Tag                    |     Train     |      Val      |     Test      |
+|:-----------------------------------------:|:-------------:|:-------------:|:-------------:|
+|       exp2 IMDB64_10 sft_filter 1 2       | 0.8774 0.8782 | 0.5834 0.5871 | 0.5840 0.5874 |
+|       exp2 IMDB64_10 sft_filter 1 4       | 0.8887 0.8895 | 0.5807 0.5848 | 0.5830 0.5855 |
+|       exp2 IMDB64_10 sft_filter 1 6       | 0.8772 0.8782 | 0.5829 0.5876 | 0.5819 0.5861 |
+|       exp2 IMDB64_10 sft_filter 1 8       | 0.8815 0.8829 | 0.5794 0.5843 | 0.5770 0.5820 |
+| exp2 IMDB64_10 noise_u 0.1 sft_filter 1 2 | 0.8792 0.8810 | 0.5614 0.5684 | 0.5667 0.5722 |
+| exp2 IMDB64_10 noise_u 0.1 sft_filter 1 4 | 0.8777 0.8799 | 0.5599 0.5660 | 0.5658 0.5709 |
+| exp2 IMDB64_10 noise_u 0.1 sft_filter 1 6 | 0.8932 0.8941 | 0.5633 0.5686 | 0.5656 0.5699 |
+| exp2 IMDB64_10 noise_u 0.1 sft_filter 1 8 | 0.8907 0.8916 | 0.5590 0.5646 | 0.5670 0.5714 |
+| exp2 IMDB64_10 noise_u 0.2 sft_filter 1 2 | 0.8722 0.8740 | 0.5399 0.5459 | 0.5256 0.5347 |
+| exp2 IMDB64_10 noise_u 0.2 sft_filter 1 4 | 0.8747 0.8761 | 0.5400 0.5461 | 0.5269 0.5363 |
+| exp2 IMDB64_10 noise_u 0.2 sft_filter 1 6 | 0.8850 0.8852 | 0.5400 0.5464 | 0.5268 0.5351 |
+| exp2 IMDB64_10 noise_u 0.2 sft_filter 1 8 | 0.8917 0.8923 | 0.5383 0.5436 | 0.5255 0.5343 |
+| exp2 IMDB64_10 noise_u 0.3 sft_filter 1 2 | 0.8687 0.8698 | 0.4857 0.4988 | 0.4978 0.5093 |
+| exp2 IMDB64_10 noise_u 0.3 sft_filter 1 4 | 0.8464 0.8473 | 0.4817 0.4951 | 0.4950 0.5077 |
+| exp2 IMDB64_10 noise_u 0.3 sft_filter 1 6 | 0.8742 0.8745 | 0.4840 0.4970 | 0.4954 0.5066 |
+| exp2 IMDB64_10 noise_u 0.3 sft_filter 1 8 | 0.8687 0.8696 | 0.4873 0.5000 | 0.4981 0.5098 |
+| exp2 IMDB64_10 noise_u 0.4 sft_filter 1 2 | 0.8591 0.8607 | 0.4860 0.5014 | 0.4735 0.4864 |
+| exp2 IMDB64_10 noise_u 0.4 sft_filter 1 4 | 0.8619 0.8630 | 0.4864 0.4981 | 0.4752 0.4840 |
+| exp2 IMDB64_10 noise_u 0.4 sft_filter 1 6 | 0.8644 0.8653 | 0.4914 0.5054 | 0.4752 0.4860 |
+| exp2 IMDB64_10 noise_u 0.4 sft_filter 1 8 | 0.8674 0.8677 | 0.4896 0.5030 | 0.4731 0.4836 |
+| exp2 IMDB64_10 noise_u 0.5 sft_filter 1 2 | 0.8466 0.8471 | 0.4372 0.4492 | 0.4369 0.4461 |
+| exp2 IMDB64_10 noise_u 0.5 sft_filter 1 4 | 0.8711 0.8714 | 0.4314 0.4445 | 0.4341 0.4438 |
+| exp2 IMDB64_10 noise_u 0.5 sft_filter 1 6 | 0.8581 0.8585 | 0.4301 0.4459 | 0.4328 0.4447 |
+| exp2 IMDB64_10 noise_u 0.5 sft_filter 1 8 | 0.8412 0.8436 | 0.4279 0.4452 | 0.4257 0.4404 |
+
+best result
+- no effect at noise_u <= 0.4
+- around 0.01 improvement at 0.5
+
+|                    Tag                    |     Train     |      Val      |     Test      |
+|:-----------------------------------------:|:-------------:|:-------------:|:-------------:|
+|              exp1 IMDB64_10               | 0.8872 0.8881 | 0.5804 0.5836 | 0.5832 0.5859 |
+|       exp2 IMDB64_10 sft_filter 1 2       | 0.8774 0.8782 | 0.5834 0.5871 | 0.5840 0.5874 |
+|        exp1 IMDB64_10 noise_u 0.1         | 0.8882 0.8897 | 0.5603 0.5672 | 0.5649 0.5700 |
+| exp2 IMDB64_10 noise_u 0.1 sft_filter 1 2 | 0.8792 0.8810 | 0.5614 0.5684 | 0.5667 0.5722 |
+|        exp1 IMDB64_10 noise_u 0.2         | 0.9006 0.9016 | 0.5451 0.5494 | 0.5275 0.5341 |
+| exp2 IMDB64_10 noise_u 0.2 sft_filter 1 4 | 0.8747 0.8761 | 0.5400 0.5461 | 0.5269 0.5363 |
+|        exp1 IMDB64_10 noise_u 0.3         | 0.8707 0.8717 | 0.4867 0.4988 | 0.5000 0.5110 |
+| exp2 IMDB64_10 noise_u 0.3 sft_filter 1 8 | 0.8687 0.8696 | 0.4873 0.5000 | 0.4981 0.5098 |
+|        exp1 IMDB64_10 noise_u 0.4         | 0.8726 0.8735 | 0.4913 0.5042 | 0.4744 0.4846 |
+| exp2 IMDB64_10 noise_u 0.4 sft_filter 1 6 | 0.8644 0.8653 | 0.4914 0.5054 | 0.4752 0.4860 |
+|        exp1 IMDB64_10 noise_u 0.5         | 0.8368 0.8391 | 0.4288 0.4464 | 0.4247 0.4388 |
+| exp2 IMDB64_10 noise_u 0.5 sft_filter 1 2 | 0.8466 0.8471 | 0.4372 0.4492 | 0.4369 0.4461 |
+
+
+when noise_ratio is high, validation picks early epoch checkpoints, even when early stop is delayed
+- this is reasonable
+there are tricking things need to be looked into
+- sample policy in data.sample: ~cnt^0.75
+
+method:
+sft + mlc;
+new one;

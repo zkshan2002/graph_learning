@@ -66,20 +66,21 @@ class MetapathDataset:
                         length = metapath_given_node.shape[1]
                     else:
                         length = 2
-                    selected_metapaths = np.zeros((0, length), dtype=np.int32)
+                    selected_metapath = np.zeros((0, length), dtype=np.int32)
                 else:
                     selected_indices = np.sort(np.random.choice(num_available, num_sample, replace=False, p=prob))
-                    selected_metapaths = metapath_given_node[selected_indices]
+                    selected_metapath = metapath_given_node[selected_indices]
                     if not keep_intermediate:
-                        selected_metapaths = selected_metapaths[:, [0, -1]]
-                metapath_sampled.append(selected_metapaths)
+                        selected_metapath = selected_metapath[:, [0, -1]]
+                metapath_sampled.append(selected_metapath)
             metapath_sampled = np.concatenate(metapath_sampled, axis=0)
             metapath_sampled_list.append(metapath_sampled)
 
         return metapath_sampled_list
 
 
-def load_data(dataset: str, project_root, device):
+def load_data(dataset: str, device):
+    project_root = osp.realpath('..')
     if dataset == 'DBLP':
         return _load_DBLP(project_root, device)
     elif dataset == 'IMDB':

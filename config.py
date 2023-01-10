@@ -1,80 +1,80 @@
-exp_cfg = dict(
-    command='',
-    tag='debug',
-    description='',
-    seed_list=[100, 200, 300, 400, 500,
-               # 600, 700, 800, 900, 1000
-               ],
-    device_id=0,
-    verbose=False,
-)
-
-train_cfg = dict(
-    epoch=100,
-    batch_size=64,
-    sample_limit=-1,
-    early_stop_cfg=dict(
-        warmup=-1,
-        patience=-1,
-        criterion=('Val_Micro_F1', 1),
+cfg = dict(
+    exp=dict(
+        tag='debug',
+        group_tag='',
+        description='',
+        seed_list=[
+            100, 200, 300, 400, 500,
+            600, 700, 800, 900, 1000
+        ],
+        device_id=0,
+        verbose=False,
     ),
-    optim_cfg=dict(
-        lr=-1,
-        weight_decay=0.001,
-    ),
-    scheduler_cfg=dict(
-        gamma=0.95,
-    ),
-    sft_cfg=dict(
-        apply_filtering=False,
-        filtering_cfg=dict(
-            memory=1,
-            warmup=2,
+    train=dict(
+        epoch=100,
+        batch_size=64,
+        sample_limit=64,
+        early_stop_cfg=dict(
+            warmup=-1,
+            patience=-1,
+            criterion=('Val_Micro_F1', 1),
         ),
-        apply_loss=False,
-        loss_cfg=dict(
-            threshold=0.5,
-            weight=[0.5, 0.1],
+        optim_cfg=dict(
+            lr=-1,
+            weight_decay=0.001,
         ),
-        apply_fixmatch=False,
-        fixmatch_cfg=dict(),
+        scheduler_cfg=dict(
+            gamma=0.95,
+        ),
+        sft_cfg=dict(
+            apply_filter=False,
+            filter_cfg=dict(
+                memory=1,
+                warmup=2,
+            ),
+            apply_loss=False,
+            loss_cfg=dict(
+                threshold=0.5,
+                weight=[0.5, 0.1],
+            ),
+            apply_fixmatch=False,
+            fixmatch_cfg=dict(),
+        ),
+        mlc_cfg=dict(
+            apply=False,
+            v_lr=2e-4,
+            T_lr=1e-2,
+        ),
     ),
-    mlc_cfg=dict(
-        apply=False,
-        virtual_lr=2e-4,
-        T_lr=1e-2,
+    data=dict(
+        dataset='',
+        split_cfg=dict(
+            apply=True,
+            seed=0,
+            split_ratio=[0.1, 0.1, 0.8],
+        ),
+        noise_cfg=dict(
+            apply=False,
+            flip_rate=0,
+            noise_type='uniform',
+            seed=0,
+            fix_num=True,
+        ),
     ),
-)
-
-data_cfg = dict(
-    dataset='',
-    split_cfg=dict(
-        apply=True,
-        seed=0,
-        split_ratio=[0.1, 0.1, 0.8],
-    ),
-    noise_cfg=dict(
-        apply=False,
-        flip_rate=0,
-        noise_type='uniform',
-        seed=0,
-        fix_num=True,
-    ),
-)
-
-model_cfg = dict(
-    type='HAN',
-    HAN_cfg=dict(
-        node_feature_dim=64,
-        node_feature_dropout_rate=0.5,
-        num_attention_heads=8,
-        semantic_attention_dim=128,
-        type_aware_semantic=True,
-    ),
-    MLP_cfg=dict(
-        node_feature_dim=64,
-        node_feature_dropout_rate=0.5,
-        num_attention_heads=8,
-        hidden_dims=[256, 256],
+    model=dict(
+        type='HAN',
+        HAN_cfg=dict(
+            node_feature_dim=64,
+            node_feature_dropout_rate=0.5,
+            num_attention_heads=8,
+            semantic_attention_dim=128,
+            type_aware_semantic=True,
+        ),
+        MLP_cfg=dict(
+            node_feature_dim=64,
+            node_feature_dropout_rate=0.5,
+            num_attention_heads=8,
+            hidden_dims=[256, 256],
+        )
     )
 )
