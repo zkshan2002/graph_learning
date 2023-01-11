@@ -14,7 +14,6 @@ def to_torch(data, device, indices=False):
     if isinstance(data, dict):
         return {key: to_torch(value, device, indices) for key, value in data.items()}
     assert isinstance(data, np.ndarray)
-    data = np.copy(data)
     data = torch.from_numpy(data).to(device)
     if indices:
         data = data.to(torch.int64)
@@ -25,7 +24,6 @@ def to_torch(data, device, indices=False):
 
 def to_np(data: torch.Tensor) -> np.array:
     assert isinstance(data, torch.Tensor)
-    data = torch.clone(data)
     data = data.detach().cpu().numpy()
     return data
 
@@ -80,7 +78,7 @@ class MetapathDataset:
 
 
 def load_data(dataset: str, device):
-    project_root = osp.realpath('..')
+    project_root = osp.realpath('.')
     if dataset == 'DBLP':
         return _load_DBLP(project_root, device)
     elif dataset == 'IMDB':

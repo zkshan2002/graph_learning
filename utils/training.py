@@ -1,4 +1,4 @@
-
+import argparse
 import copy
 import logging
 
@@ -9,9 +9,14 @@ import torch.nn.functional as F
 from utils.data import to_np, MetapathDataset, Sampler
 from utils.evaluate import evaluate_multiclass
 
-from typing import Tuple, Dict
+from typing import Tuple, List, Dict
 
 
+def parse_args():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--workdir', type=str)
+    args = ap.parse_args()
+    return args
 
 
 def get_cfg(arg: dict):
@@ -164,3 +169,21 @@ def test(model, data: MetapathDataset, sampler: Sampler, all_indices: np.array):
     macro_f1, micro_f1 = evaluate_multiclass(labels, pred)
     return loss, macro_f1, micro_f1
 
+
+def display_result(result: List[float], key, logger: logging.Logger):
+    msg = ' | '.join([f'{num:.6f}' for num in result])
+    msg = f'{key}: {msg}'
+    logger.info(msg)
+    mean = np.mean(result)
+    std = np.std(result)
+    logger.info(f'{key} Summary: {mean:.6f} ~ {std:.6f}')
+    val_dict = {key: mean}
+    return val_dict
+
+
+def get_summary_msg(tag, summary_dict: Dict[str, float]):
+    import pdb
+    pdb.set_trace()
+    return f"| {tag} | {summary_dict['Train_Macro_F1']:.4f} {summary_dict['Train_Micro_F1']:.4f} |" + \
+           f" {summary_dict['Val_Macro_F1']:.4f} {summary_dict['Val_Micro_F1']:.4f} |" + \
+           f" {summary_dict['Test_Macro_F1']:.4f} {summary_dict['Test_Micro_F1']:.4f} |"

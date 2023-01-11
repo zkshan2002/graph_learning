@@ -42,8 +42,8 @@ cfg = dict(
         ),
         mlc_cfg=dict(
             apply=False,
-            v_lr=2e-4,
-            T_lr=1e-2,
+            v_lr=-1,
+            T_lr=-1,
         ),
     ),
     data=dict(

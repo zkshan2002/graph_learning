@@ -1,4 +1,3 @@
-import copy
 import os
 import os.path as osp
 import json
@@ -8,19 +7,20 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from utils.training import get_cfg, set_seed, get_logger, build_model, EarlyStopping, test
+from utils.training import parse_args, set_seed, get_logger, build_model, EarlyStopping, test, display_result, \
+    get_summary_msg
 from utils.data import to_np, load_data, split_data, Sampler
 from utils.evaluate import evaluate_multiclass
 from utils.noisy_labels import apply_label_noise, MemoryBank
 
 
-def run_exp(arg: dict, workdir):
+def run_exp():
+    args = parse_args()
+    workdir = args.workdir
+    tag = workdir.split('/')[-1]
+    with open(osp.join(workdir, f'../../all_cfg.json'), 'r') as f:
+        cfg = json.load(f)[tag]
 
-    # cfg = get_cfg(arg)
-    # cfg_file = osp.join(workdir, 'cfg.json')
-    # with open(cfg_file, 'w') as f:
-    #     json.dump(cfg, f)
-    #
     # summary_dict = {}
     # for key in [
     #     'Train_Macro_F1', 'Train_Micro_F1',
@@ -28,13 +28,11 @@ def run_exp(arg: dict, workdir):
     #     'Test_Macro_F1', 'Test_Micro_F1',
     # ]:
     #     summary_dict[key] = np.random.randint(0, 10000)
-    # return summary_dict
+    # with open(osp.join(workdir, 'out.json'), 'w') as f:
+    #     json.dump(summary_dict, f)
+    # return
 
-    cfg = get_cfg(arg)
-
-    tag = cfg['exp']['tag']
-    is_debug = (tag == 'debug')
-    if is_debug:
+    if tag == 'debug':
         cfg['exp']['seed_list'] = cfg['exp']['seed_list'][:2]
         cfg['train']['patience'] = 2
 
@@ -46,7 +44,7 @@ def run_exp(arg: dict, workdir):
 
     # manage workdir
     cfg_file = osp.join(workdir, 'cfg.json')
-    log_file = osp.join(workdir, 'results.log')
+    log_file = osp.join(workdir, 'summary.log')
     logger_summary = get_logger('summary', log_file, cfg['exp']['verbose'])
 
     # load dataset
@@ -134,7 +132,6 @@ def run_exp(arg: dict, workdir):
         ckpt_file = osp.join(workdir, f'ckpt_seed{seed}.pt')
 
         model.init_weights()
-
         optimizer = torch.optim.Adam(model.params(), **cfg['train']['optim_cfg'])
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, **cfg['train']['scheduler_cfg'])
 
@@ -324,25 +321,12 @@ def run_exp(arg: dict, workdir):
         exp_results['Test_Macro_F1'].append(test_macro_f1)
         exp_results['Test_Micro_F1'].append(test_micro_f1)
 
-        msg = f'Test | {test_macro_f1:.4f} {test_micro_f1:.4f}'
-        logger.info(msg)
+        logger.info(f'Test | {test_macro_f1:.4f} {test_micro_f1:.4f}')
 
         run_end_timer = time.time()
         time_elapsed = run_end_timer - run_start_timer
         exp_results['Time'].append(time_elapsed)
-        msg = f'Run {run_id + 1} / {num_repeat} Ended | Time_elapsed {time_elapsed:.4f}'
-        logger.info(msg)
-
-    def display_result(result, key, logger):
-        msg = ' | '.join([f'{num:.6f}' for num in result])
-        msg = f'{key}: {msg}'
-        logger.info(msg)
-        mean = np.mean(result)
-        std = np.std(result)
-        msg = f'{key} Summary: {mean:.6f} ~ {std:.6f}'
-        logger.info(msg)
-        msg_dict = {key: f'{mean:.4f}'}
-        return msg_dict, mean
+        logger.info(f'Run {run_id + 1} / {num_repeat} Ended | Time_elapsed {time_elapsed:.4f}')
 
     summary_dict = {}
     for key in [
@@ -351,14 +335,16 @@ def run_exp(arg: dict, workdir):
         'Val_Macro_F1', 'Val_Micro_F1',
         'Test_Macro_F1', 'Test_Micro_F1',
     ]:
-        msg_dict, mean = display_result(exp_results[key], key, logger_summary)
-        summary_dict.update(msg_dict)
+        str_dict = display_result(exp_results[key], key, logger_summary)
+        summary_dict.update(str_dict)
 
-    summary_msg = f" | {tag} | {summary_dict['Train_Macro_F1']} {summary_dict['Train_Micro_F1']} |" + \
-                  f" {summary_dict['Val_Macro_F1']} {summary_dict['Val_Micro_F1']} |" + \
-                  f" {summary_dict['Test_Macro_F1']} {summary_dict['Test_Micro_F1']} |"
+    logger_summary.info(get_summary_msg(tag, summary_dict))
 
-    logger_summary.info(summary_msg)
+    with open(osp.join(workdir, 'out.json'), 'w') as f:
+        json.dump(summary_dict, f)
 
-    return summary_dict
+    return
 
+
+if __name__ == '__main__':
+    run_exp()
